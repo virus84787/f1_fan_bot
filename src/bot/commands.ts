@@ -4,6 +4,7 @@ import { ErgastService } from '../services/ergast';
 import moment from 'moment-timezone';
 import { Message } from 'telegraf/types';
 import { Logger } from '../utils/logger';
+import { getTranslation, isValidLanguage, LanguageCode, languageNames } from '../locale';
 
 export class CommandHandlers {
     private db: DatabaseService;
@@ -18,6 +19,26 @@ export class CommandHandlers {
         return new CommandHandlers(db);
     }
 
+    // Helper method to get user language preference
+    private async getUserLanguage(chatId: number): Promise<LanguageCode> {
+        try {
+            const user = await this.db.get<{ language: string }>(
+                'SELECT language FROM users WHERE chat_id = ?',
+                [chatId]
+            );
+            return (user?.language as LanguageCode) || 'en';
+        } catch (error) {
+            Logger.error('Error getting user language', error, { chatId });
+            return 'en';
+        }
+    }
+
+    // Helper method to translate message with user's language preference
+    private async translate(chatId: number, key: string, variables: Record<string, string | number> = {}): Promise<string> {
+        const language = await this.getUserLanguage(chatId);
+        return getTranslation(key, language, variables);
+    }
+
     public async handleStart(ctx: Context): Promise<void> {
         Logger.command(ctx, 'start');
         const chatId = ctx.chat?.id;
@@ -30,23 +51,65 @@ export class CommandHandlers {
             );
             Logger.info('New user registered', { userId: ctx.from?.id, chatId });
 
-            await ctx.reply(
-                'Welcome to F1 Fan Bot! 🏎️\n\n' +
-                'Available commands:\n' +
-                '/schedule - View upcoming races\n' +
-                '/driverstandings - Current driver standings\n' +
-                '/constructorstandings - Current constructor standings\n' +
-                '/settimezone - Set your timezone\n' +
-                '/remind - Set race reminders\n' +
-                '/live - Get next race information\n' +
-                '/pitstops - View last race results\n' +
-                '/driver - Get driver info (use: /driver Hamilton)\n' +
-                '/results - Get last race results\n' +
-                '/apistatus - Check or change data source'
-            );
+            const welcomeMessage = await this.translate(chatId, 'welcome');
+            await ctx.reply(welcomeMessage);
         } catch (error) {
             Logger.error('Error in handleStart', error, { chatId });
-            await ctx.reply('Sorry, there was an error starting the bot. Please try again later.');
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage);
+        }
+    }
+
+    // Add language command handler
+    public async handleLanguage(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'language');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
+        try {
+            const message = ctx.message as Message.TextMessage | undefined;
+            if (!message?.text) return;
+
+            const currentLanguage = await this.getUserLanguage(chatId);
+
+            // Language code is the second part of the command (e.g., /language en)
+            const args = message.text.split(' ');
+            const languageCode = args[1]?.toLowerCase();
+
+            // If no language code provided, show current language and options
+            if (!languageCode) {
+                const languageName = languageNames[currentLanguage] || currentLanguage;
+                const currentLangMessage = await this.translate(chatId, 'language_current', { language: languageName });
+                const optionsMessage = await this.translate(chatId, 'language_options');
+                await ctx.reply(`${currentLangMessage}\n\n${optionsMessage}`);
+                return;
+            }
+
+            // If language code provided, validate and update
+            if (isValidLanguage(languageCode)) {
+                await this.db.run(
+                    'UPDATE users SET language = ? WHERE chat_id = ?',
+                    [languageCode, chatId]
+                );
+
+                // Get confirmation message in the NEW language
+                const confirmMessage = getTranslation('language_set', languageCode as LanguageCode);
+
+                Logger.info('Language updated', {
+                    chatId,
+                    newLanguage: languageCode,
+                    oldLanguage: currentLanguage
+                });
+
+                await ctx.reply(confirmMessage);
+            } else {
+                const invalidMessage = await this.translate(chatId, 'language_invalid');
+                await ctx.reply(invalidMessage);
+            }
+        } catch (error) {
+            Logger.error('Error in handleLanguage', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage);
         }
     }
 
@@ -159,22 +222,35 @@ export class CommandHandlers {
 
     public async handleDriverStandings(ctx: Context): Promise<void> {
         Logger.command(ctx, 'driverstandings');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const standings = await ErgastService.getDriverStandings();
             Logger.info('Retrieved driver standings', { count: standings.length });
 
-            let message = '🏆 Current Driver Standings:\n\n';
-            standings.slice(0, 10).forEach((standing, index) => {
-                message += `${index + 1}. ${standing.Driver.givenName} ${standing.Driver.familyName}\n`;
-                message += `   Points: ${standing.points} | Wins: ${standing.wins}\n`;
-                message += `   Team: ${standing.Constructors[0].name}\n\n`;
-            });
+            const titleMessage = await this.translate(chatId, 'driver_standings_title');
+            let message = `${titleMessage}\n\n`;
+
+            for (let i = 0; i < Math.min(standings.length, 10); i++) {
+                const standing = standings[i];
+                const entryMessage = await this.translate(chatId, 'driver_standings_entry', {
+                    position: i + 1,
+                    firstName: standing.Driver.givenName,
+                    lastName: standing.Driver.familyName,
+                    points: standing.points,
+                    wins: standing.wins,
+                    team: standing.Constructors[0].name
+                });
+                message += `${entryMessage}\n\n`;
+            }
 
             await ctx.reply(message);
-            Logger.info('Sent driver standings message', { chatId: ctx.chat?.id });
+            Logger.info('Sent driver standings message', { chatId });
         } catch (error) {
-            Logger.error('Error in handleDriverStandings', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error fetching the driver standings. Please try again later.');
+            Logger.error('Error in handleDriverStandings', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_driver_standings');
+            await ctx.reply(errorMessage);
         }
     }
 

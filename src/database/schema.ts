@@ -1,13 +1,14 @@
 export const SCHEMA = {
-    users: `
+  users: `
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY,
       chat_id INTEGER NOT NULL,
       timezone TEXT DEFAULT 'UTC',
+      language TEXT DEFAULT 'en',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `,
-    races: `
+  races: `
     CREATE TABLE IF NOT EXISTS races (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       race_id TEXT UNIQUE,
@@ -21,7 +22,7 @@ export const SCHEMA = {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `,
-    driver_standings: `
+  driver_standings: `
     CREATE TABLE IF NOT EXISTS driver_standings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       driver_id TEXT NOT NULL,
@@ -34,7 +35,7 @@ export const SCHEMA = {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `,
-    constructor_standings: `
+  constructor_standings: `
     CREATE TABLE IF NOT EXISTS constructor_standings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       constructor_id TEXT NOT NULL,
@@ -46,7 +47,7 @@ export const SCHEMA = {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `,
-    reminders: `
+  reminders: `
     CREATE TABLE IF NOT EXISTS reminders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,

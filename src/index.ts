@@ -37,6 +37,7 @@ async function main() {
         bot.command('pitstops', (ctx) => commandHandlers.handlePitStops(ctx));
         bot.command('driver', (ctx) => commandHandlers.handleDriverInfo(ctx));
         bot.command('apistatus', (ctx) => commandHandlers.handleApiStatus(ctx));
+        bot.command('language', (ctx) => commandHandlers.handleLanguage(ctx));
 
         Logger.info('Bot commands registered');
 
@@ -51,7 +52,8 @@ async function main() {
             { command: 'driver', description: 'Get driver info (use: /driver Hamilton)' },
             { command: 'results', description: 'Get last race results' },
             { command: 'settimezone', description: 'Set your timezone' },
-            { command: 'apistatus', description: 'View or change data source' }
+            { command: 'apistatus', description: 'View or change data source' },
+            { command: 'language', description: 'Change language' }
         ]);
 
         // Schedule updates for race data
