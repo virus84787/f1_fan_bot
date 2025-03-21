@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: f1-fan-bot
     restart: unless-stopped
+    user: "1000:1000"  # Default UID:GID for first user on most Linux systems
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - DATABASE_PATH=/app/data/f1bot.db
