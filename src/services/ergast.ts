@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { Logger } from '../utils/logger';
 
-const PRIMARY_BASE_URL = 'http://ergast.com/api/f1';
-const FALLBACK_BASE_URL = 'https://api.jolpi.ca/ergast/f1';
+// Always use jolpi.ca API endpoint as requested
+const BASE_URL = 'https://api.jolpi.ca/ergast/f1';
 const CURRENT_YEAR = 2025; // Hardcoded year for the F1 season
 
 export interface Race {
@@ -75,18 +75,11 @@ export interface ConstructorStanding {
 }
 
 export class ErgastService {
-    private static useAlternativeApi = false;
     private static apiCallCount = {
         total: 0,
         success: 0,
-        failed: 0,
-        primary: 0,
-        fallback: 0
+        failed: 0
     };
-
-    private static get BASE_URL(): string {
-        return this.useAlternativeApi ? FALLBACK_BASE_URL : PRIMARY_BASE_URL;
-    }
 
     /**
      * Returns the current F1 season year (2025)
@@ -97,15 +90,10 @@ export class ErgastService {
 
     private static logApiRequest(url: string, method: string, params?: any): void {
         this.apiCallCount.total++;
-        if (this.useAlternativeApi) {
-            this.apiCallCount.fallback++;
-        } else {
-            this.apiCallCount.primary++;
-        }
 
         Logger.apiCall(url, method, {
-            apiSource: this.useAlternativeApi ? 'jolpi.ca' : 'ergast.com',
-            endpoint: url.replace(this.BASE_URL, ''),
+            apiSource: 'jolpi.ca',
+            endpoint: url.replace(BASE_URL, ''),
             params: params || {},
             year: this.getCurrentYear(),
             apiCallStats: { ...this.apiCallCount }
@@ -116,7 +104,7 @@ export class ErgastService {
         this.apiCallCount.success++;
         Logger.info('API request successful', {
             url,
-            apiSource: this.useAlternativeApi ? 'jolpi.ca' : 'ergast.com',
+            apiSource: 'jolpi.ca',
             responseSize: `${Math.round(responseSize / 1024)} KB`,
             timeMs: `${timeMs} ms`,
             successRate: `${Math.round((this.apiCallCount.success / this.apiCallCount.total) * 100)}%`
@@ -127,7 +115,7 @@ export class ErgastService {
         this.apiCallCount.failed++;
         Logger.error('API request failed', {
             url,
-            apiSource: this.useAlternativeApi ? 'jolpi.ca' : 'ergast.com',
+            apiSource: 'jolpi.ca',
             errorCode: error.response?.status || 'Unknown',
             errorMessage: error.message || String(error),
             failureRate: `${Math.round((this.apiCallCount.failed / this.apiCallCount.total) * 100)}%`
@@ -137,84 +125,37 @@ export class ErgastService {
     public static getApiStats(): any {
         return {
             ...this.apiCallCount,
-            successRate: `${Math.round((this.apiCallCount.success / this.apiCallCount.total) * 100)}%`,
-            primaryRate: `${Math.round((this.apiCallCount.primary / this.apiCallCount.total) * 100)}%`,
-            fallbackRate: `${Math.round((this.apiCallCount.fallback / this.apiCallCount.total) * 100)}%`
+            successRate: `${Math.round((this.apiCallCount.success / this.apiCallCount.total) * 100)}%`
         };
     }
 
     private static async fetch<T>(endpoint: string): Promise<T> {
         const startTime = Date.now();
         try {
-            const apiUrl = `${this.BASE_URL}${endpoint}.json`;
-            this.logApiRequest(apiUrl, 'GET');
+            // Make sure endpoint is properly formatted for the jolpi.ca API
+            const formattedEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
+            const apiUrl = `${BASE_URL}/${formattedEndpoint}.json`;
 
+            this.logApiRequest(apiUrl, 'GET');
             const response = await axios.get(apiUrl);
+
             const endTime = Date.now();
             const timeMs = endTime - startTime;
-
             const responseSize = JSON.stringify(response.data).length;
-            this.logApiSuccess(apiUrl, responseSize, timeMs);
 
+            this.logApiSuccess(apiUrl, responseSize, timeMs);
             return response.data.MRData as T;
         } catch (error: any) {
-            const apiUrl = `${this.BASE_URL}${endpoint}.json`;
+            const formattedEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
+            const apiUrl = `${BASE_URL}/${formattedEndpoint}.json`;
+
             this.logApiFailure(apiUrl, error);
-
-            // If already using alternative API, don't try fallback
-            if (this.useAlternativeApi || !endpoint.startsWith('/')) {
-                throw error;
-            }
-
-            // Try with the alternative API
-            const fallbackStartTime = Date.now();
-            try {
-                Logger.info('Attempting to use alternative Ergast API (jolpi.ca)', {
-                    originalEndpoint: endpoint,
-                    reason: 'Primary API failure'
-                });
-                this.useAlternativeApi = true;
-
-                // Remove the leading slash for the alternative API
-                const modifiedEndpoint = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
-                const fallbackUrl = `${FALLBACK_BASE_URL}/${modifiedEndpoint}.json`;
-
-                this.logApiRequest(fallbackUrl, 'GET');
-                const response = await axios.get(fallbackUrl);
-
-                const endTime = Date.now();
-                const timeMs = endTime - fallbackStartTime;
-                const responseSize = JSON.stringify(response.data).length;
-                this.logApiSuccess(fallbackUrl, responseSize, timeMs);
-
-                return response.data.MRData as T;
-            } catch (fallbackError: any) {
-                const fallbackUrl = `${FALLBACK_BASE_URL}/${endpoint.substring(1)}.json`;
-                this.logApiFailure(fallbackUrl, fallbackError);
-                Logger.error('Both primary and fallback APIs failed', {
-                    endpoint,
-                    primaryError: error.message || String(error),
-                    fallbackError: fallbackError.message || String(fallbackError)
-                });
-                throw fallbackError;
-            }
+            throw error;
         }
     }
 
-    public static resetApiChoice(): void {
-        this.useAlternativeApi = false;
-        Logger.info('Reset to primary Ergast API');
-    }
-
-    public static forceAlternativeApi(): void {
-        this.useAlternativeApi = true;
-        Logger.info('Forced to use alternative Ergast API (jolpi.ca)');
-    }
-
     public static getCurrentApiStatus(): string {
-        return this.useAlternativeApi
-            ? 'Using alternative Ergast API (jolpi.ca)'
-            : 'Using primary Ergast API (ergast.com)';
+        return 'Using Ergast API (jolpi.ca)';
     }
 
     public static async getCurrentSchedule(): Promise<Race[]> {
@@ -224,7 +165,7 @@ export class ErgastService {
 
     public static async getScheduleByYear(year: number): Promise<Race[]> {
         Logger.info(`Fetching F1 schedule for year ${year}`);
-        const data = await this.fetch<any>(`/${year}`);
+        const data = await this.fetch<any>(`${year}`);
         return data.RaceTable.Races;
     }
 
@@ -240,22 +181,24 @@ export class ErgastService {
     }
 
     public static async getDriverStandings(): Promise<DriverStanding[]> {
-        const data = await this.fetch<any>('/2025/driverStandings');
+        const data = await this.fetch<any>('2025/driverStandings');
         return data.StandingsTable.StandingsLists[0]?.DriverStandings || [];
     }
 
     public static async getConstructorStandings(): Promise<ConstructorStanding[]> {
-        const data = await this.fetch<any>('/2025/constructorStandings');
+        const data = await this.fetch<any>('2025/constructorStandings');
         return data.StandingsTable.StandingsLists[0]?.ConstructorStandings || [];
     }
 
+    // Get the last race results
     public static async getLastRaceResults(): Promise<any> {
-        const data = await this.fetch<any>('/2025/last/results');
-        return data.RaceTable.Races[0];
+        const data = await this.fetch<any>('current/last/results');
+        return data.RaceTable.Races[0] || null;
     }
 
+    // Get qualifying results for a specific round
     public static async getQualifyingResults(round: number): Promise<any> {
-        const data = await this.fetch<any>(`/2025/${round}/qualifying`);
-        return data.RaceTable.Races[0];
+        const data = await this.fetch<any>(`current/${round}/qualifying`);
+        return data.RaceTable.Races[0] || null;
     }
 } 

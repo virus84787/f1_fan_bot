@@ -38,6 +38,8 @@ async function main() {
         bot.command('driver', (ctx) => commandHandlers.handleDriverInfo(ctx));
         bot.command('apistatus', (ctx) => commandHandlers.handleApiStatus(ctx));
         bot.command('language', (ctx) => commandHandlers.handleLanguage(ctx));
+        bot.command('language_en', (ctx) => commandHandlers.handleLanguageEn(ctx));
+        bot.command('language_uk', (ctx) => commandHandlers.handleLanguageUk(ctx));
 
         Logger.info('Bot commands registered');
 
@@ -53,7 +55,9 @@ async function main() {
             { command: 'results', description: 'Get last race results' },
             { command: 'settimezone', description: 'Set your timezone' },
             { command: 'apistatus', description: 'View or change data source' },
-            { command: 'language', description: 'Change language' }
+            { command: 'language', description: 'Language settings' },
+            { command: 'language_en', description: 'Switch to English' },
+            { command: 'language_uk', description: 'Switch to Ukrainian' }
         ]);
 
         // Schedule updates for race data

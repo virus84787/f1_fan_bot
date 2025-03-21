@@ -70,42 +70,19 @@ export class CommandHandlers {
             const message = ctx.message as Message.TextMessage | undefined;
             if (!message?.text) return;
 
+            // Ensure the user exists in the database
+            await this.db.run(
+                'INSERT OR IGNORE INTO users (id, chat_id) VALUES (?, ?)',
+                [ctx.from?.id, chatId]
+            );
+
             const currentLanguage = await this.getUserLanguage(chatId);
 
-            // Language code is the second part of the command (e.g., /language en)
-            const args = message.text.split(' ');
-            const languageCode = args[1]?.toLowerCase();
-
-            // If no language code provided, show current language and options
-            if (!languageCode) {
-                const languageName = languageNames[currentLanguage] || currentLanguage;
-                const currentLangMessage = await this.translate(chatId, 'language_current', { language: languageName });
-                const optionsMessage = await this.translate(chatId, 'language_options');
-                await ctx.reply(`${currentLangMessage}\n\n${optionsMessage}`);
-                return;
-            }
-
-            // If language code provided, validate and update
-            if (isValidLanguage(languageCode)) {
-                await this.db.run(
-                    'UPDATE users SET language = ? WHERE chat_id = ?',
-                    [languageCode, chatId]
-                );
-
-                // Get confirmation message in the NEW language
-                const confirmMessage = getTranslation('language_set', languageCode as LanguageCode);
-
-                Logger.info('Language updated', {
-                    chatId,
-                    newLanguage: languageCode,
-                    oldLanguage: currentLanguage
-                });
-
-                await ctx.reply(confirmMessage);
-            } else {
-                const invalidMessage = await this.translate(chatId, 'language_invalid');
-                await ctx.reply(invalidMessage);
-            }
+            // Display current language and options
+            const languageName = languageNames[currentLanguage] || currentLanguage;
+            const currentLangMessage = await this.translate(chatId, 'language_current', { language: languageName });
+            const optionsMessage = await this.translate(chatId, 'language_options');
+            await ctx.reply(`${currentLangMessage}\n\n${optionsMessage}`);
         } catch (error) {
             Logger.error('Error in handleLanguage', error, { chatId });
             const errorMessage = await this.translate(chatId, 'error_general');
@@ -113,8 +90,87 @@ export class CommandHandlers {
         }
     }
 
+    // Handle English language selection
+    public async handleLanguageEn(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'language_en');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
+        try {
+            // Ensure the user exists in the database
+            await this.db.run(
+                'INSERT OR IGNORE INTO users (id, chat_id) VALUES (?, ?)',
+                [ctx.from?.id, chatId]
+            );
+
+            const currentLanguage = await this.getUserLanguage(chatId);
+
+            // Update to English
+            await this.db.run(
+                'UPDATE users SET language = ? WHERE chat_id = ?',
+                ['en', chatId]
+            );
+
+            // Get confirmation message in English
+            const confirmMessage = getTranslation('language_set', 'en');
+
+            Logger.info('Language updated', {
+                chatId,
+                newLanguage: 'en',
+                oldLanguage: currentLanguage
+            });
+
+            await ctx.reply(confirmMessage);
+        } catch (error) {
+            Logger.error('Error in handleLanguageEn', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage);
+        }
+    }
+
+    // Handle Ukrainian language selection
+    public async handleLanguageUk(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'language_uk');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
+        try {
+            // Ensure the user exists in the database
+            await this.db.run(
+                'INSERT OR IGNORE INTO users (id, chat_id) VALUES (?, ?)',
+                [ctx.from?.id, chatId]
+            );
+
+            const currentLanguage = await this.getUserLanguage(chatId);
+
+            // Update to Ukrainian
+            await this.db.run(
+                'UPDATE users SET language = ? WHERE chat_id = ?',
+                ['uk', chatId]
+            );
+
+            // Get confirmation message in Ukrainian
+            const confirmMessage = getTranslation('language_set', 'uk');
+
+            Logger.info('Language updated', {
+                chatId,
+                newLanguage: 'uk',
+                oldLanguage: currentLanguage
+            });
+
+            await ctx.reply(confirmMessage);
+        } catch (error) {
+            Logger.error('Error in handleLanguageUk', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage);
+        }
+    }
+
     public async handleSchedule(ctx: Context): Promise<void> {
         Logger.command(ctx, 'schedule');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const currentYear = ErgastService.getCurrentYear();
             Logger.info(`Fetching schedule for ${currentYear}`);
@@ -124,10 +180,10 @@ export class CommandHandlers {
 
             const user = await this.db.get<{ timezone: string }>(
                 'SELECT timezone FROM users WHERE chat_id = ?',
-                [ctx.chat?.id]
+                [chatId]
             );
             Logger.info('Retrieved user timezone', {
-                chatId: ctx.chat?.id,
+                chatId,
                 timezone: user?.timezone || 'UTC'
             });
 
@@ -144,79 +200,139 @@ export class CommandHandlers {
                 .slice(-5)
                 .reverse();
 
-            let message = `📅 F1 ${currentYear} Season Schedule\n\n`;
+            // Get schedule title
+            const titleMessage = await this.translate(chatId, 'schedule_title', { year: currentYear });
+            let message = `${titleMessage}\n\n`;
 
             // Show upcoming races if available
             if (upcomingRaces.length > 0) {
-                message += '🔜 Upcoming Races:\n\n';
-                upcomingRaces.forEach(race => {
+                const upcomingMessage = await this.translate(chatId, 'upcoming_races');
+                message += `${upcomingMessage}\n\n`;
+
+                for (const race of upcomingRaces) {
                     const raceTime = moment.tz(`${race.date} ${race.time || '00:00:00'}`, timezone);
-                    message += `🏁 Round ${race.round}: ${race.raceName}\n`;
-                    message += `📍 ${race.Circuit.Location.locality}, ${race.Circuit.Location.country}\n`;
-                    message += `🏎️ ${race.Circuit.circuitName}\n`;
-                    message += `⏰ ${raceTime.format('MMMM D, YYYY HH:mm')} ${timezone}\n`;
+
+                    const roundMessage = await this.translate(chatId, 'race_round', {
+                        round: race.round,
+                        raceName: race.raceName
+                    });
+                    message += `${roundMessage}\n`;
+
+                    const locationMessage = await this.translate(chatId, 'race_location', {
+                        locality: race.Circuit.Location.locality,
+                        country: race.Circuit.Location.country
+                    });
+                    message += `${locationMessage}\n`;
+
+                    const circuitMessage = await this.translate(chatId, 'race_circuit', {
+                        circuitName: race.Circuit.circuitName
+                    });
+                    message += `${circuitMessage}\n`;
+
+                    const timeMessage = await this.translate(chatId, 'race_time', {
+                        date: raceTime.format('MMMM D, YYYY HH:mm'),
+                        timezone: timezone
+                    });
+                    message += `${timeMessage}\n`;
 
                     // Add session times if available
                     if (race.FirstPractice) {
                         const fp1Time = moment.tz(`${race.FirstPractice.date} ${race.FirstPractice.time}`, timezone);
-                        message += `🔹 FP1: ${fp1Time.format('MMMM D, HH:mm')}\n`;
+                        const fp1Message = await this.translate(chatId, 'fp1', {
+                            time: fp1Time.format('MMMM D, HH:mm')
+                        });
+                        message += `${fp1Message}\n`;
                     }
                     if (race.SecondPractice) {
                         const fp2Time = moment.tz(`${race.SecondPractice.date} ${race.SecondPractice.time}`, timezone);
-                        message += `🔹 FP2: ${fp2Time.format('MMMM D, HH:mm')}\n`;
+                        const fp2Message = await this.translate(chatId, 'fp2', {
+                            time: fp2Time.format('MMMM D, HH:mm')
+                        });
+                        message += `${fp2Message}\n`;
                     }
                     if (race.ThirdPractice) {
                         const fp3Time = moment.tz(`${race.ThirdPractice.date} ${race.ThirdPractice.time}`, timezone);
-                        message += `🔹 FP3: ${fp3Time.format('MMMM D, HH:mm')}\n`;
+                        const fp3Message = await this.translate(chatId, 'fp3', {
+                            time: fp3Time.format('MMMM D, HH:mm')
+                        });
+                        message += `${fp3Message}\n`;
                     }
                     if (race.Sprint) {
                         const sprintTime = moment.tz(`${race.Sprint.date} ${race.Sprint.time}`, timezone);
-                        message += `🔹 Sprint: ${sprintTime.format('MMMM D, HH:mm')}\n`;
+                        const sprintMessage = await this.translate(chatId, 'sprint', {
+                            time: sprintTime.format('MMMM D, HH:mm')
+                        });
+                        message += `${sprintMessage}\n`;
                     }
                     if (race.Qualifying) {
                         const qualiTime = moment.tz(`${race.Qualifying.date} ${race.Qualifying.time}`, timezone);
-                        message += `🔹 Quali: ${qualiTime.format('MMMM D, HH:mm')}\n`;
+                        const qualiMessage = await this.translate(chatId, 'qualifying', {
+                            time: qualiTime.format('MMMM D, HH:mm')
+                        });
+                        message += `${qualiMessage}\n`;
                     }
 
                     message += '\n';
-                });
+                }
             } else if (currentYear > new Date().getFullYear()) {
-                message += `⚠️ The ${currentYear} F1 schedule has not been released yet.\n\n`;
+                const notReleasedMessage = await this.translate(chatId, 'schedule_not_released', {
+                    year: currentYear
+                });
+                message += `${notReleasedMessage}\n\n`;
             } else {
-                message += '⚠️ No upcoming races scheduled for the rest of the season.\n\n';
+                const noUpcomingMessage = await this.translate(chatId, 'no_upcoming_races');
+                message += `${noUpcomingMessage}\n\n`;
             }
 
             // Show past races if there are any
             if (pastRaces.length > 0) {
-                message += '📅 Recent Past Races:\n\n';
-                pastRaces.forEach(race => {
+                const pastRacesMessage = await this.translate(chatId, 'past_races');
+                message += `${pastRacesMessage}\n\n`;
+
+                for (const race of pastRaces) {
                     const raceTime = moment.tz(`${race.date} ${race.time || '00:00:00'}`, timezone);
-                    message += `🏁 Round ${race.round}: ${race.raceName}\n`;
-                    message += `📍 ${race.Circuit.Location.locality}, ${race.Circuit.Location.country}\n`;
+
+                    const roundMessage = await this.translate(chatId, 'race_round', {
+                        round: race.round,
+                        raceName: race.raceName
+                    });
+                    message += `${roundMessage}\n`;
+
+                    const locationMessage = await this.translate(chatId, 'race_location', {
+                        locality: race.Circuit.Location.locality,
+                        country: race.Circuit.Location.country
+                    });
+                    message += `${locationMessage}\n`;
+
                     message += `📅 ${raceTime.format('MMMM D, YYYY')}\n\n`;
-                });
+                }
             } else if (currentYear > new Date().getFullYear()) {
                 // Don't add anything for future years with no past races
             } else {
-                message += '⚠️ No races have taken place this season yet.\n';
+                const noPastRacesMessage = await this.translate(chatId, 'no_past_races');
+                message += `${noPastRacesMessage}\n`;
             }
 
             // If no races at all
             if (races.length === 0) {
-                message = `❌ No race schedule available for the ${currentYear} F1 season. Please try again later.`;
+                const noRacesMessage = await this.translate(chatId, 'no_races', {
+                    year: currentYear
+                });
+                message = noRacesMessage;
             }
 
             await ctx.reply(message);
             Logger.info('Sent schedule message', {
-                chatId: ctx.chat?.id,
+                chatId,
                 upcomingRacesCount: upcomingRaces.length,
                 pastRacesCount: pastRaces.length,
                 totalRaces: races.length,
                 year: currentYear
             });
         } catch (error) {
-            Logger.error('Error in handleSchedule', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error fetching the schedule. Please try again later.');
+            Logger.error('Error in handleSchedule', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_schedule');
+            await ctx.reply(errorMessage);
         }
     }
 
@@ -256,64 +372,84 @@ export class CommandHandlers {
 
     public async handleConstructorStandings(ctx: Context): Promise<void> {
         Logger.command(ctx, 'constructorstandings');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const standings = await ErgastService.getConstructorStandings();
             Logger.info('Retrieved constructor standings', { count: standings.length });
 
-            let message = '🏭 Current Constructor Standings:\n\n';
-            standings.forEach((standing, index) => {
-                message += `${index + 1}. ${standing.Constructor.name}\n`;
-                message += `   Points: ${standing.points} | Wins: ${standing.wins}\n\n`;
-            });
+            const titleMessage = await this.translate(chatId, 'constructor_standings_title');
+            let message = `${titleMessage}\n\n`;
+
+            for (let i = 0; i < standings.length; i++) {
+                const standing = standings[i];
+                const entryMessage = await this.translate(chatId, 'constructor_standings_entry', {
+                    position: i + 1,
+                    name: standing.Constructor.name,
+                    points: standing.points,
+                    wins: standing.wins
+                });
+                message += `${entryMessage}\n\n`;
+            }
 
             await ctx.reply(message);
-            Logger.info('Sent constructor standings message', { chatId: ctx.chat?.id });
+            Logger.info('Sent constructor standings message', { chatId });
         } catch (error) {
-            Logger.error('Error in handleConstructorStandings', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error fetching the constructor standings. Please try again later.');
+            Logger.error('Error in handleConstructorStandings', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_constructor_standings');
+            await ctx.reply(errorMessage);
         }
     }
 
     public async handleSetTimezone(ctx: Context): Promise<void> {
         Logger.command(ctx, 'settimezone');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         const message = ctx.message as Message.TextMessage | undefined;
         if (!message?.text) return;
 
         const timezone = message.text.split(' ')[1];
         if (!timezone || !moment.tz.zone(timezone)) {
             Logger.info('Invalid timezone provided', {
-                chatId: ctx.chat?.id,
+                chatId,
                 attemptedTimezone: timezone
             });
-            await ctx.reply(
-                'Please provide a valid timezone. Example:\n' +
-                '/settimezone Europe/London\n\n' +
-                'Find your timezone here: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
-            );
+            const invalidMessage = await this.translate(chatId, 'timezone_invalid');
+            await ctx.reply(invalidMessage);
             return;
         }
 
         try {
             await this.db.run(
                 'UPDATE users SET timezone = ? WHERE chat_id = ?',
-                [timezone, ctx.chat?.id]
+                [timezone, chatId]
             );
             Logger.info('Timezone updated', {
-                chatId: ctx.chat?.id,
+                chatId,
                 newTimezone: timezone
             });
-            await ctx.reply(`Timezone successfully set to ${timezone}`);
+
+            const successMessage = await this.translate(chatId, 'timezone_updated', {
+                timezone: timezone
+            });
+            await ctx.reply(successMessage);
         } catch (error) {
             Logger.error('Error in handleSetTimezone', error, {
-                chatId: ctx.chat?.id,
+                chatId,
                 attemptedTimezone: timezone
             });
-            await ctx.reply('Sorry, there was an error setting your timezone. Please try again later.');
+            const errorMessage = await this.translate(chatId, 'error_timezone');
+            await ctx.reply(errorMessage);
         }
     }
 
     public async handleResults(ctx: Context): Promise<void> {
         Logger.command(ctx, 'results');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const lastRace = await ErgastService.getLastRaceResults();
             Logger.info('Retrieved last race results', {
@@ -324,36 +460,50 @@ export class CommandHandlers {
 
             const user = await this.db.get<{ timezone: string }>(
                 'SELECT timezone FROM users WHERE chat_id = ?',
-                [ctx.chat?.id]
+                [chatId]
             );
             const timezone = user?.timezone || 'UTC';
 
             const raceDate = moment.tz(`${lastRace.date} ${lastRace.time || '00:00:00'}`, timezone);
-            let message = `🏁 ${lastRace.raceName}\n`;
-            message += `📅 ${raceDate.format('MMMM D, YYYY')}\n`;
-            message += `⏰ ${raceDate.format('HH:mm')} ${timezone}\n\n`;
-            message += `Results:\n\n`;
 
-            lastRace.Results.slice(0, 10).forEach((result: any) => {
-                message += `${result.position}. ${result.Driver.givenName} ${result.Driver.familyName}\n`;
-                message += `   Time: ${result.Time?.time || 'DNF'}\n`;
-                message += `   Points: ${result.points}\n\n`;
+            const titleMessage = await this.translate(chatId, 'results_title', {
+                raceName: lastRace.raceName,
+                date: raceDate.format('MMMM D, YYYY')
             });
+
+            let message = `${titleMessage}\n\n`;
+
+            for (let i = 0; i < Math.min(lastRace.Results.length, 10); i++) {
+                const result = lastRace.Results[i];
+                const entryMessage = await this.translate(chatId, 'results_entry', {
+                    position: result.position,
+                    firstName: result.Driver.givenName,
+                    lastName: result.Driver.familyName,
+                    constructor: result.Constructor.name,
+                    time: result.Time?.time || 'DNF',
+                    points: result.points
+                });
+                message += `${entryMessage}\n\n`;
+            }
 
             await ctx.reply(message);
             Logger.info('Sent race results message', {
-                chatId: ctx.chat?.id,
+                chatId,
                 raceDate: lastRace.date,
                 timezone
             });
         } catch (error) {
-            Logger.error('Error in handleResults', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error fetching the race results. Please try again later.');
+            Logger.error('Error in handleResults', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_results');
+            await ctx.reply(errorMessage);
         }
     }
 
     public async handleLive(ctx: Context): Promise<void> {
         Logger.command(ctx, 'live');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const currentYear = ErgastService.getCurrentYear();
 
@@ -361,20 +511,51 @@ export class CommandHandlers {
             const nextRace = await ErgastService.getNextRace();
 
             if (!nextRace) {
-                await ctx.reply(`No upcoming races found for the ${currentYear} season.`);
+                const noUpcomingRaceMessage = await this.translate(chatId, 'no_upcoming_race');
+                await ctx.reply(noUpcomingRaceMessage);
                 return;
             }
 
             const drivers = await ErgastService.getDriverStandings();
 
-            let message = `🏎️ ${currentYear} F1 Season\n`;
-            message += `📅 Next Race: ${nextRace.raceName}\n`;
-            message += `📍 ${nextRace.Circuit.Location.locality}, ${nextRace.Circuit.Location.country}\n`;
-            message += `🏁 ${nextRace.Circuit.circuitName}\n\n`;
+            const titleMessage = await this.translate(chatId, 'next_race_title', {
+                raceName: nextRace.raceName
+            });
+
+            const roundMessage = await this.translate(chatId, 'next_race_round', {
+                round: nextRace.round,
+                year: currentYear
+            });
+
+            const circuitMessage = await this.translate(chatId, 'next_race_circuit', {
+                circuitName: nextRace.Circuit.circuitName
+            });
+
+            const locationMessage = await this.translate(chatId, 'next_race_location', {
+                locality: nextRace.Circuit.Location.locality,
+                country: nextRace.Circuit.Location.country
+            });
 
             // Add race date and time
             const raceDate = moment(`${nextRace.date}T${nextRace.time || '00:00:00Z'}`);
-            message += `⏰ Race: ${raceDate.format('MMMM D, YYYY HH:mm')} UTC\n\n`;
+            const dateMessage = await this.translate(chatId, 'next_race_date', {
+                date: raceDate.format('MMMM D, YYYY HH:mm')
+            });
+
+            // Calculate countdown
+            const now = moment();
+            const duration = moment.duration(raceDate.diff(now));
+            const days = Math.floor(duration.asDays());
+            const hours = duration.hours();
+            const minutes = duration.minutes();
+
+            const countdownMessage = await this.translate(chatId, 'countdown', {
+                days,
+                hours,
+                minutes
+            });
+
+            let message = `${titleMessage}\n${roundMessage}\n${circuitMessage}\n${locationMessage}\n${dateMessage}\n${countdownMessage}\n\n`;
 
             // Add qualifying and practice sessions if available
             if (nextRace.Qualifying) {
@@ -401,18 +582,19 @@ export class CommandHandlers {
             }
 
             await ctx.reply(message);
-            Logger.info('Sent live session information', {
-                chatId: ctx.chat?.id,
-                nextRace: nextRace.raceName
-            });
+            Logger.info('Sent live session information', { chatId, nextRace: nextRace.raceName });
         } catch (error) {
-            Logger.error('Error in handleLive', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error fetching live data. Please try again later.');
+            Logger.error('Error in handleLive', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_live');
+            await ctx.reply(errorMessage);
         }
     }
 
     public async handlePitStops(ctx: Context): Promise<void> {
         Logger.command(ctx, 'pitstops');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const currentYear = ErgastService.getCurrentYear();
 
@@ -420,38 +602,49 @@ export class CommandHandlers {
             const lastRace = await ErgastService.getLastRaceResults();
 
             if (!lastRace) {
-                await ctx.reply(`No race data available for the ${currentYear} season yet.`);
+                const noResultsMessage = await this.translate(chatId, 'no_results');
+                await ctx.reply(noResultsMessage);
                 return;
             }
 
-            let message = `🔧 ${currentYear} F1 Season - ${lastRace.raceName} Results:\n\n`;
+            const raceDate = moment(lastRace.date);
+            const titleMessage = await this.translate(chatId, 'pitstops_title', {
+                raceName: lastRace.raceName,
+                date: raceDate.format('MMMM D, YYYY')
+            });
+
+            let message = `${titleMessage}\n\n`;
 
             if (lastRace.Results && lastRace.Results.length > 0) {
-                lastRace.Results.slice(0, 10).forEach((result: any, index: number) => {
-                    const position = result.position;
-                    const driverName = `${result.Driver.givenName} ${result.Driver.familyName}`;
-                    const team = result.Constructor.name;
-                    const time = result.Time ? result.Time.time : 'DNF';
-
-                    message += `${position}. ${driverName} (${team}) - ${time}\n`;
-                });
+                for (let i = 0; i < Math.min(lastRace.Results.length, 10); i++) {
+                    const result = lastRace.Results[i];
+                    const entryMessage = await this.translate(chatId, 'pitstops_entry', {
+                        lap: i + 1, // Using index as lap for simplicity
+                        firstName: result.Driver.givenName,
+                        lastName: result.Driver.familyName,
+                        duration: result.Time ? result.Time.time : 'DNF'
+                    });
+                    message += `${entryMessage}\n\n`;
+                }
             } else {
-                message += "No results data available for this race.";
+                const noPitstopsMessage = await this.translate(chatId, 'no_pitstops');
+                message += noPitstopsMessage;
             }
 
             await ctx.reply(message);
-            Logger.info('Sent race results', {
-                chatId: ctx.chat?.id,
-                raceName: lastRace.raceName
-            });
+            Logger.info('Sent race results', { chatId, raceName: lastRace.raceName });
         } catch (error) {
-            Logger.error('Error in handlePitStops', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error fetching race data. Please try again later.');
+            Logger.error('Error in handlePitStops', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_pitstops');
+            await ctx.reply(errorMessage);
         }
     }
 
     public async handleDriverInfo(ctx: Context): Promise<void> {
         Logger.command(ctx, 'driver');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const currentYear = ErgastService.getCurrentYear();
             const msgText = ctx.message as Message.TextMessage | undefined;
@@ -461,11 +654,8 @@ export class CommandHandlers {
             const driverQuery = msgText.text.split(' ').slice(1).join(' ').trim();
 
             if (!driverQuery) {
-                await ctx.reply(
-                    'Please provide a driver name or number. Examples:\n' +
-                    '/driver Hamilton\n' +
-                    '/driver 44'
-                );
+                const usageMessage = await this.translate(chatId, 'driver_info_usage');
+                await ctx.reply(usageMessage);
                 return;
             }
 
@@ -491,101 +681,103 @@ export class CommandHandlers {
             }
 
             if (!foundDriver) {
-                await ctx.reply(`Driver not found in ${currentYear} F1 season.`);
+                const notFoundMessage = await this.translate(chatId, 'driver_info_not_found');
+                await ctx.reply(notFoundMessage);
                 return;
             }
 
             const driver = foundDriver.Driver;
             const constructor = foundDriver.Constructors[0];
 
-            let responseMsg = `👤 ${currentYear} F1 Season\n`;
-            responseMsg += `🏎️ ${driver.givenName} ${driver.familyName}\n`;
-            responseMsg += `🏢 ${constructor.name}\n`;
+            const titleMessage = await this.translate(chatId, 'driver_info_title', {
+                firstName: driver.givenName,
+                lastName: driver.familyName
+            });
+
+            const teamMessage = await this.translate(chatId, 'driver_info_team', {
+                team: constructor.name
+            });
+
+            let message = `${titleMessage}\n${teamMessage}\n`;
 
             // Add optional fields with null checks
             if (driver.permanentNumber) {
-                responseMsg += `🔢 ${driver.permanentNumber}\n`;
+                const numberMessage = await this.translate(chatId, 'driver_info_number', {
+                    number: driver.permanentNumber
+                });
+                message += `${numberMessage}\n`;
             }
 
             if (driver.nationality) {
-                responseMsg += `🌍 ${driver.nationality}\n`;
+                const nationalityMessage = await this.translate(chatId, 'driver_info_nationality', {
+                    nationality: driver.nationality
+                });
+                message += `${nationalityMessage}\n`;
             }
 
-            responseMsg += `📊 Position: ${foundDriver.position}\n`;
-            responseMsg += `💯 Points: ${foundDriver.points}\n`;
-            responseMsg += `🏆 Wins: ${foundDriver.wins}\n`;
+            message += `📊 Position: ${foundDriver.position}\n`;
+            message += `💯 Points: ${foundDriver.points}\n`;
+            message += `🏆 Wins: ${foundDriver.wins}\n`;
 
             // Add Wikipedia link if available
             if (driver.url) {
-                responseMsg += `\nℹ️ More info: ${driver.url}\n`;
+                message += `\nℹ️ More info: ${driver.url}\n`;
             }
 
-            await ctx.reply(responseMsg);
+            await ctx.reply(message);
             Logger.info('Sent driver info', {
-                chatId: ctx.chat?.id,
+                chatId,
                 driverName: `${driver.givenName} ${driver.familyName}`,
                 year: currentYear
             });
         } catch (error) {
-            Logger.error('Error in handleDriverInfo', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error fetching driver data. Please try again later.');
+            Logger.error('Error in handleDriverInfo', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_driver_info');
+            await ctx.reply(errorMessage);
         }
     }
 
     public async handleApiStatus(ctx: Context): Promise<void> {
         Logger.command(ctx, 'apistatus');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
         try {
             const message = ctx.message as Message.TextMessage | undefined;
             const command = message?.text?.split(' ')[1]?.toLowerCase() || '';
 
-            if (command === 'alternative' || command === 'alt') {
-                ErgastService.forceAlternativeApi();
-                await ctx.reply('✅ Switched to alternative Ergast API (jolpi.ca)');
-                Logger.info('User switched to alternative API', { chatId: ctx.chat?.id });
-            } else if (command === 'primary' || command === 'main') {
-                ErgastService.resetApiChoice();
-                await ctx.reply('✅ Switched to primary Ergast API (ergast.com)');
-                Logger.info('User switched to primary API', { chatId: ctx.chat?.id });
-            } else if (command === 'stats') {
+            if (command === 'stats') {
                 // Show API usage statistics
                 const apiStats = ErgastService.getApiStats();
                 const currentYear = ErgastService.getCurrentYear();
 
-                await ctx.reply(
-                    `📊 F1 Data API Usage Stats (${currentYear}):\n\n` +
-                    `Total API calls: ${apiStats.total}\n` +
-                    `Successful calls: ${apiStats.success} (${apiStats.successRate})\n` +
-                    `Failed calls: ${apiStats.failed}\n\n` +
-                    `Primary API (ergast.com): ${apiStats.primary} calls (${apiStats.primaryRate})\n` +
-                    `Fallback API (jolpi.ca): ${apiStats.fallback} calls (${apiStats.fallbackRate})\n`
-                );
-                Logger.info('Displayed API stats', {
-                    chatId: ctx.chat?.id,
-                    apiStats
+                const statsMessage = await this.translate(chatId, 'api_stats', {
+                    total: apiStats.total,
+                    success: apiStats.success,
+                    failed: apiStats.failed
                 });
+
+                await ctx.reply(statsMessage);
+                Logger.info('Displayed API stats', { chatId, apiStats });
             } else {
                 // Just show status
                 const currentYear = ErgastService.getCurrentYear();
                 const apiStatus = ErgastService.getCurrentApiStatus();
 
-                await ctx.reply(
-                    `📊 F1 Data APIs Status:\n\n` +
-                    `🏎️ F1 Season: ${currentYear}\n` +
-                    `🔄 ${apiStatus}\n\n` +
-                    `Commands:\n` +
-                    `• /apistatus - Show current API status\n` +
-                    `• /apistatus alt - Switch to alternative API\n` +
-                    `• /apistatus primary - Switch to primary API\n` +
-                    `• /apistatus stats - View API usage statistics`
-                );
-                Logger.info('Displayed API status', {
-                    chatId: ctx.chat?.id,
-                    currentApi: apiStatus
+                const statusMessage = await this.translate(chatId, 'api_status', {
+                    source: apiStatus,
+                    status: 'active'
                 });
+
+                const usageMessage = await this.translate(chatId, 'api_usage');
+
+                await ctx.reply(`${statusMessage}\n\n${usageMessage}`);
+                Logger.info('Displayed API status', { chatId, currentApi: apiStatus });
             }
         } catch (error) {
-            Logger.error('Error in handleApiStatus', error, { chatId: ctx.chat?.id });
-            await ctx.reply('Sorry, there was an error managing API settings. Please try again later.');
+            Logger.error('Error in handleApiStatus', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage);
         }
     }
 }

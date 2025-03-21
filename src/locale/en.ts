@@ -11,7 +11,9 @@ export const en = {
         '/driver - Get driver info (use: /driver Hamilton)\n' +
         '/results - Get last race results\n' +
         '/apistatus - Check or change data source\n' +
-        '/language - Change language',
+        '/language - Language settings\n' +
+        '/language_en - Switch to English\n' +
+        '/language_uk - Switch to Ukrainian',
 
     // Schedule command
     schedule_title: '📅 F1 {year} Season Schedule',
@@ -73,16 +75,16 @@ export const en = {
 
     // API status
     api_status: 'Current API Source: {source}\nStatus: {status}',
-    api_switched: 'API source switched to: {source}',
-    api_usage: 'API Status Commands:\n/apistatus - Show current status\n/apistatus alt - Switch to alternative API\n/apistatus primary - Switch to primary API\n/apistatus stats - Show API statistics',
-    api_stats: 'API Statistics:\nPrimary API calls: {primaryCalls}\nFallback API calls: {fallbackCalls}\nFailed calls: {failedCalls}',
+    api_switched: 'API source: {source}',
+    api_usage: 'API Status Commands:\n/apistatus - Show current status\n/apistatus stats - Show API statistics',
+    api_stats: 'API Statistics:\nCalls: {total}\nSuccessful calls: {success}\nFailed calls: {failed}',
 
     // Language
     language_title: 'Language Settings',
     language_current: 'Current language: {language}',
     language_set: 'Language has been set to English',
-    language_options: 'Available languages:\n- English (/language en)\n- Ukrainian (/language uk)',
-    language_invalid: 'Invalid language code. Available options:\n- English (/language en)\n- Ukrainian (/language uk)',
+    language_options: 'Available languages:\n- English (/language_en)\n- Ukrainian (/language_uk)',
+    language_invalid: 'Invalid language code. Available options:\n- English (/language_en)\n- Ukrainian (/language_uk)',
 
     // General errors
     error_general: 'Sorry, an error occurred. Please try again later.',

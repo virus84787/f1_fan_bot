@@ -22,6 +22,7 @@ export class DatabaseService {
 
             DatabaseService.instance = new DatabaseService(dbPath);
             await DatabaseService.instance.initializeTables();
+            await DatabaseService.instance.runMigrations();
         }
         return DatabaseService.instance;
     }
@@ -37,6 +38,25 @@ export class DatabaseService {
                 resolve();
             });
         });
+    }
+
+    private async runMigrations(): Promise<void> {
+        try {
+            // Check if the language column exists in the users table
+            const tableInfo = await this.query<{ name: string }>(
+                "PRAGMA table_info(users)"
+            );
+            
+            const hasLanguageColumn = tableInfo.some(column => column.name === 'language');
+            
+            if (!hasLanguageColumn) {
+                // Add the language column if it doesn't exist
+                await this.run("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'");
+                console.log("Migration: Added 'language' column to users table");
+            }
+        } catch (error) {
+            console.error("Error running migrations:", error);
+        }
     }
 
     public async query<T>(sql: string, params: any[] = []): Promise<T[]> {
