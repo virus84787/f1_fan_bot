@@ -13,8 +13,10 @@ COPY src/ ./src/
 # Build the TypeScript code
 RUN npm run build
 
-# Create data directory for SQLite database
-RUN mkdir -p /app/data
+# Create data directory for SQLite database with proper permissions
+RUN mkdir -p /app/data && \
+    chown -R node:node /app/data && \
+    chmod 755 /app/data
 
 # Remove development dependencies
 RUN npm prune --production
@@ -22,4 +24,5 @@ RUN npm prune --production
 # Set user for security
 USER node
 
-CMD ["node", "dist/index.js"] 
+# Make sure the entrypoint creates the DB file with proper permissions
+CMD ["sh", "-c", "touch /app/data/f1bot.db && node dist/index.js"] 
