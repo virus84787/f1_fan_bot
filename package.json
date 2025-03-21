@@ -1,0 +1,32 @@
+{
+  "name": "f1_fan",
+  "version": "1.0.0",
+  "description": "F1 Telegram Bot for race information and updates",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "npm run build && node dist/index.js",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "debug": "node --inspect -r ts-node/register src/index.ts"
+  },
+  "keywords": ["f1", "formula1", "telegram", "bot"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^20.11.24",
+    "@types/node-schedule": "^2.1.6",
+    "@types/sqlite3": "^3.1.11",
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.5",
+    "moment-timezone": "^0.5.45",
+    "node-schedule": "^2.1.1",
+    "sqlite3": "^5.1.7",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
