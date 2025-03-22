@@ -16,6 +16,12 @@ export class Logger {
         console.log(this.formatMessage('INFO', message, context));
     }
 
+    public static debug(message: string, context?: Record<string, any>): void {
+        if (process.env.DEBUG === 'true') {
+            console.log(this.formatMessage('DEBUG', message, context));
+        }
+    }
+
     public static error(message: string, error?: any, context?: Record<string, any>): void {
         const errorContext = {
             ...context,

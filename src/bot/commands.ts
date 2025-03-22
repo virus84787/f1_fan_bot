@@ -1,23 +1,71 @@
 import { Context } from 'telegraf';
 import { DatabaseService } from '../database';
-import { ErgastService } from '../services/ergast';
+import { ErgastService, DriverStanding, ConstructorStanding } from '../services/ergast';
 import moment from 'moment-timezone';
 import { Message } from 'telegraf/types';
 import { Logger } from '../utils/logger';
 import { getTranslation, isValidLanguage, LanguageCode, languageNames } from '../locale';
 import { Markup } from 'telegraf';
 
+// Extend the context type to include session
+interface SessionData {
+    selectedRace?: {
+        id: string;
+        name: string;
+        date: string;
+        time: string | undefined;
+    };
+}
+
+interface SessionContext extends Context {
+    session: SessionData;
+}
+
+// Define reminder time intervals in minutes
+enum ReminderTime {
+    OneHour = 60,
+    ThreeHours = 180,
+    OneDay = 1440
+}
+
+// Interface for reminder data
+interface Reminder {
+    id: number;
+    user_id: number;
+    chat_id: number;
+    event_id: string;
+    remind_before: number;
+    created_at: string;
+}
+
+// Database interfaces for standings data
+interface DriverStandingDB {
+    position: number;
+    driver_name: string;
+    points: number;
+    wins: number;
+    team: string;
+}
+
+interface ConstructorStandingDB {
+    position: number;
+    team_name: string;
+    points: number;
+    wins: number;
+}
+
 export class CommandHandlers {
     private db: DatabaseService;
+    private sessions: Map<number, SessionData> = new Map(); // Add sessions map
 
     private constructor(db: DatabaseService) {
         this.db = db;
     }
 
-    public static async create(): Promise<CommandHandlers> {
-        const db = await DatabaseService.getInstance();
+    public static async create(db?: DatabaseService): Promise<CommandHandlers> {
+        const database = db || await DatabaseService.getInstance();
         Logger.info('CommandHandlers initialized');
-        return new CommandHandlers(db);
+        return new CommandHandlers(database);
     }
 
     // Helper method to acknowledge button callbacks
@@ -68,12 +116,7 @@ export class CommandHandlers {
             const welcomeMessage = await this.translate(chatId, 'welcome');
 
             // Create main menu keyboard buttons
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(welcomeMessage, mainMenuButtons);
         } catch (error) {
@@ -104,10 +147,7 @@ export class CommandHandlers {
             const optionsMessage = await this.translate(chatId, 'language_options');
 
             // Create language selection keyboard
-            const languageButtons = Markup.keyboard([
-                ['🇬🇧 English', '🇺🇦 Ukrainian'],
-                ['⬅️ Back to Main Menu']
-            ]).resize();
+            const languageButtons = await this.getLanguageMenuKeyboard(chatId);
 
             await ctx.reply(`${currentLangMessage}\n\n${optionsMessage}`, languageButtons);
         } catch (error) {
@@ -147,12 +187,7 @@ export class CommandHandlers {
             });
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(confirmMessage, mainMenuButtons);
         } catch (error) {
@@ -192,12 +227,7 @@ export class CommandHandlers {
             });
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(confirmMessage, mainMenuButtons);
         } catch (error) {
@@ -218,6 +248,15 @@ export class CommandHandlers {
 
             const races = await ErgastService.getCurrentSchedule();
             Logger.info('Retrieved race schedule', { raceCount: races.length, year: currentYear });
+
+            // Log a sample race to debug
+            if (races.length > 0) {
+                Logger.debug('Sample race data for debugging:', {
+                    race: races[0],
+                    circuit: races[0].Circuit,
+                    location: races[0].Circuit.Location
+                });
+            }
 
             const user = await this.db.get<{ timezone: string }>(
                 'SELECT timezone FROM users WHERE chat_id = ?',
@@ -253,64 +292,42 @@ export class CommandHandlers {
                 for (const race of upcomingRaces) {
                     const raceTime = moment.tz(`${race.date} ${race.time || '00:00:00'}`, timezone);
 
+                    // Build race information
                     const roundMessage = await this.translate(chatId, 'race_round', {
                         round: race.round,
                         raceName: race.raceName
                     });
                     message += `${roundMessage}\n`;
 
-                    const locationMessage = await this.translate(chatId, 'race_location', {
-                        locality: race.Circuit.Location.locality,
-                        country: race.Circuit.Location.country
-                    });
-                    message += `${locationMessage}\n`;
+                    // Location information
+                    message += `📍 ${race.Circuit.Location.locality || 'Unknown'}, ${race.Circuit.Location.country || 'Unknown'}\n`;
 
-                    const circuitMessage = await this.translate(chatId, 'race_circuit', {
-                        circuitName: race.Circuit.circuitName
-                    });
-                    message += `${circuitMessage}\n`;
+                    // Circuit information
+                    message += `🏎️ ${race.Circuit.circuitName || 'Unknown Circuit'}\n`;
 
-                    const timeMessage = await this.translate(chatId, 'race_time', {
-                        date: raceTime.format('MMMM D, YYYY HH:mm'),
-                        timezone: timezone
-                    });
-                    message += `${timeMessage}\n`;
+                    // Time information
+                    message += `⏰ ${raceTime.format('MMMM D, YYYY HH:mm')} ${timezone}\n`;
 
                     // Add session times if available
                     if (race.FirstPractice) {
                         const fp1Time = moment.tz(`${race.FirstPractice.date} ${race.FirstPractice.time}`, timezone);
-                        const fp1Message = await this.translate(chatId, 'fp1', {
-                            time: fp1Time.format('MMMM D, HH:mm')
-                        });
-                        message += `${fp1Message}\n`;
+                        message += `🔹 FP1: ${fp1Time.format('MMMM D, HH:mm')}\n`;
                     }
                     if (race.SecondPractice) {
                         const fp2Time = moment.tz(`${race.SecondPractice.date} ${race.SecondPractice.time}`, timezone);
-                        const fp2Message = await this.translate(chatId, 'fp2', {
-                            time: fp2Time.format('MMMM D, HH:mm')
-                        });
-                        message += `${fp2Message}\n`;
+                        message += `🔹 FP2: ${fp2Time.format('MMMM D, HH:mm')}\n`;
                     }
                     if (race.ThirdPractice) {
                         const fp3Time = moment.tz(`${race.ThirdPractice.date} ${race.ThirdPractice.time}`, timezone);
-                        const fp3Message = await this.translate(chatId, 'fp3', {
-                            time: fp3Time.format('MMMM D, HH:mm')
-                        });
-                        message += `${fp3Message}\n`;
+                        message += `🔹 FP3: ${fp3Time.format('MMMM D, HH:mm')}\n`;
                     }
                     if (race.Sprint) {
                         const sprintTime = moment.tz(`${race.Sprint.date} ${race.Sprint.time}`, timezone);
-                        const sprintMessage = await this.translate(chatId, 'sprint', {
-                            time: sprintTime.format('MMMM D, HH:mm')
-                        });
-                        message += `${sprintMessage}\n`;
+                        message += `🔹 Sprint: ${sprintTime.format('MMMM D, HH:mm')}\n`;
                     }
                     if (race.Qualifying) {
                         const qualiTime = moment.tz(`${race.Qualifying.date} ${race.Qualifying.time}`, timezone);
-                        const qualiMessage = await this.translate(chatId, 'qualifying', {
-                            time: qualiTime.format('MMMM D, HH:mm')
-                        });
-                        message += `${qualiMessage}\n`;
+                        message += `🔹 Quali: ${qualiTime.format('MMMM D, HH:mm')}\n`;
                     }
 
                     message += '\n';
@@ -339,11 +356,8 @@ export class CommandHandlers {
                     });
                     message += `${roundMessage}\n`;
 
-                    const locationMessage = await this.translate(chatId, 'race_location', {
-                        locality: race.Circuit.Location.locality,
-                        country: race.Circuit.Location.country
-                    });
-                    message += `${locationMessage}\n`;
+                    // Location information
+                    message += `📍 ${race.Circuit.Location.locality || 'Unknown'}, ${race.Circuit.Location.country || 'Unknown'}\n`;
 
                     message += `📅 ${raceTime.format('MMMM D, YYYY')}\n\n`;
                 }
@@ -363,12 +377,7 @@ export class CommandHandlers {
             }
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent schedule message', {
@@ -385,106 +394,117 @@ export class CommandHandlers {
         }
     }
 
+    // Handler for driver standings
     public async handleDriverStandings(ctx: Context): Promise<void> {
         Logger.command(ctx, 'driverstandings');
-        const chatId = ctx.chat?.id;
-        if (!chatId) return;
+        const chatId = this.getChatIdFromContext(ctx);
 
         try {
-            // Get the current driver standings
-            const standings = await ErgastService.getDriverStandings();
-            Logger.info('Retrieved driver standings', { chatId, count: standings.length });
+            // Get driver standings
+            const driverStandings = await this.db.query<DriverStandingDB>(`
+                SELECT position, driver_name, points, wins, team 
+                FROM driver_standings 
+                ORDER BY position ASC
+            `);
 
-            // Format the standings message
-            const headerMessage = await this.translate(chatId, 'driver_standings_header');
-            let message = `${headerMessage}\n\n`;
+            if (!driverStandings || driverStandings.length === 0) {
+                try {
+                    // If no standings in database, try to fetch from API
+                    const standings = await ErgastService.getDriverStandings();
+                    if (!standings || standings.length === 0) {
+                        const errorMessage = await this.translate(chatId, 'error_driver_standings');
+                        await ctx.reply(errorMessage, await this.getStandingsMenuKeyboard(chatId));
+                        return;
+                    }
 
-            // Use a counter for sequential numbering
-            let positionCounter = 1;
+                    // Format the standings
+                    let message = `🏆 ${await this.translate(chatId, 'driver_standings_title')}\n\n`;
 
-            for (const standing of standings.slice(0, 20)) { // Limit to top 20
-                // Use either the valid API position or our sequential position counter
-                const position = (standing.position && standing.position !== "-") ?
-                    standing.position :
-                    positionCounter.toString();
+                    for (const [index, standing] of standings.entries()) {
+                        message += `${index + 1}. ${standing.Driver.givenName} ${standing.Driver.familyName} - ${standing.points} ${await this.translate(chatId, 'points')}\n`;
+                        message += `   🏎️ ${standing.Constructors[0].name}\n\n`;
+                    }
 
-                const formattedStanding = await this.translate(chatId, 'driver_standing_entry', {
-                    position: position,
-                    name: `${standing.Driver.givenName} ${standing.Driver.familyName}`,
-                    team: standing.Constructors[0].name,
-                    points: standing.points
-                });
-                message += `${formattedStanding}\n`;
-
-                // Always increment our counter
-                positionCounter++;
+                    await ctx.reply(message, await this.getStandingsMenuKeyboard(chatId));
+                    Logger.info('Displayed driver standings from API', { chatId });
+                } catch (error) {
+                    Logger.error('Error getting driver standings from API', error, { chatId });
+                    const errorMessage = await this.translate(chatId, 'error_driver_standings');
+                    await ctx.reply(errorMessage, await this.getStandingsMenuKeyboard(chatId));
+                }
+                return;
             }
 
-            // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            // Format the standings from database
+            let message = `🏆 ${await this.translate(chatId, 'driver_standings_title')}\n\n`;
 
-            await ctx.reply(message, mainMenuButtons);
-            Logger.info('Displayed driver standings', { chatId });
+            for (const standing of driverStandings) {
+                message += `${standing.position}. ${standing.driver_name} - ${standing.points} ${await this.translate(chatId, 'points')}\n`;
+                message += `   🏎️ ${standing.team}\n\n`;
+            }
+
+            await ctx.reply(message, await this.getStandingsMenuKeyboard(chatId));
+            Logger.info('Displayed driver standings from database', { chatId });
         } catch (error) {
             Logger.error('Error in handleDriverStandings', error, { chatId });
-            const errorMessage = await this.translate(chatId, 'error_general');
-            await ctx.reply(errorMessage);
+            const errorMessage = await this.translate(chatId, 'error_driver_standings');
+            await ctx.reply(errorMessage, await this.getStandingsMenuKeyboard(chatId));
         }
     }
 
+    // Handler for constructor standings
     public async handleConstructorStandings(ctx: Context): Promise<void> {
         Logger.command(ctx, 'constructorstandings');
-        const chatId = ctx.chat?.id;
-        if (!chatId) return;
+        const chatId = this.getChatIdFromContext(ctx);
 
         try {
-            // Get the current constructor standings
-            const standings = await ErgastService.getConstructorStandings();
-            Logger.info('Retrieved constructor standings', { chatId, count: standings.length });
+            // Get constructor standings
+            const constructorStandings = await this.db.query<ConstructorStandingDB>(`
+                SELECT position, team_name, points, wins 
+                FROM constructor_standings 
+                ORDER BY position ASC
+            `);
 
-            // Format the standings message
-            const headerMessage = await this.translate(chatId, 'constructor_standings_header');
-            let message = `${headerMessage}\n\n`;
+            if (!constructorStandings || constructorStandings.length === 0) {
+                try {
+                    // If no standings in database, try to fetch from API
+                    const standings = await ErgastService.getConstructorStandings();
+                    if (!standings || standings.length === 0) {
+                        const errorMessage = await this.translate(chatId, 'error_constructor_standings');
+                        await ctx.reply(errorMessage, await this.getStandingsMenuKeyboard(chatId));
+                        return;
+                    }
 
-            // Use a counter for sequential numbering
-            let positionCounter = 1;
+                    // Format the standings
+                    let message = `🛠️ ${await this.translate(chatId, 'constructor_standings_title')}\n\n`;
 
-            for (const standing of standings) {
-                // Use either the valid API position or our sequential position counter
-                const position = (standing.position && standing.position !== "-") ?
-                    standing.position :
-                    positionCounter.toString();
+                    for (const [index, standing] of standings.entries()) {
+                        message += `${index + 1}. ${standing.Constructor.name} - ${standing.points} ${await this.translate(chatId, 'points')}\n\n`;
+                    }
 
-                const formattedStanding = await this.translate(chatId, 'constructor_standing_entry', {
-                    position: position,
-                    name: standing.Constructor.name,
-                    points: standing.points
-                });
-                message += `${formattedStanding}\n`;
-
-                // Always increment our counter
-                positionCounter++;
+                    await ctx.reply(message, await this.getStandingsMenuKeyboard(chatId));
+                    Logger.info('Displayed constructor standings from API', { chatId });
+                } catch (error) {
+                    Logger.error('Error getting constructor standings from API', error, { chatId });
+                    const errorMessage = await this.translate(chatId, 'error_constructor_standings');
+                    await ctx.reply(errorMessage, await this.getStandingsMenuKeyboard(chatId));
+                }
+                return;
             }
 
-            // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            // Format the standings from database
+            let message = `🛠️ ${await this.translate(chatId, 'constructor_standings_title')}\n\n`;
 
-            await ctx.reply(message, mainMenuButtons);
-            Logger.info('Displayed constructor standings', { chatId });
+            for (const standing of constructorStandings) {
+                message += `${standing.position}. ${standing.team_name} - ${standing.points} ${await this.translate(chatId, 'points')}\n\n`;
+            }
+
+            await ctx.reply(message, await this.getStandingsMenuKeyboard(chatId));
+            Logger.info('Displayed constructor standings from database', { chatId });
         } catch (error) {
             Logger.error('Error in handleConstructorStandings', error, { chatId });
-            const errorMessage = await this.translate(chatId, 'error_general');
-            await ctx.reply(errorMessage);
+            const errorMessage = await this.translate(chatId, 'error_constructor_standings');
+            await ctx.reply(errorMessage, await this.getStandingsMenuKeyboard(chatId));
         }
     }
 
@@ -505,12 +525,7 @@ export class CommandHandlers {
             const invalidMessage = await this.translate(chatId, 'timezone_invalid');
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(invalidMessage, mainMenuButtons);
             return;
@@ -531,12 +546,7 @@ export class CommandHandlers {
             });
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(successMessage, mainMenuButtons);
         } catch (error) {
@@ -577,12 +587,7 @@ export class CommandHandlers {
             }
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(message, mainMenuButtons);
             Logger.info('Displayed race results', { chatId });
@@ -608,12 +613,7 @@ export class CommandHandlers {
                 const noUpcomingRaceMessage = await this.translate(chatId, 'no_upcoming_race');
 
                 // Return to main menu keyboard
-                const mainMenuButtons = Markup.keyboard([
-                    ['🏁 Schedule', '🏆 Driver Standings'],
-                    ['🛠️ Constructor Standings', '🏎️ Results'],
-                    ['⏱️ Live', '🛑 Pit Stops'],
-                    ['🌐 Language Settings']
-                ]).resize();
+                const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
                 await ctx.reply(noUpcomingRaceMessage, mainMenuButtons);
                 return;
@@ -632,30 +632,15 @@ export class CommandHandlers {
             const timezone = user?.timezone || 'UTC';
             const drivers = await ErgastService.getDriverStandings();
 
-            const titleMessage = await this.translate(chatId, 'next_race_title', {
-                raceName: nextRace.raceName
-            });
-
-            const roundMessage = await this.translate(chatId, 'next_race_round', {
-                round: nextRace.round,
-                year: currentYear
-            });
-
-            const circuitMessage = await this.translate(chatId, 'next_race_circuit', {
-                circuitName: nextRace.Circuit.circuitName
-            });
-
-            const locationMessage = await this.translate(chatId, 'next_race_location', {
-                locality: nextRace.Circuit.Location.locality,
-                country: nextRace.Circuit.Location.country
-            });
+            // Build the message directly
+            let message = `🏎️ Next Race: ${nextRace.raceName || 'Unknown Race'}\n`;
+            message += `Round ${nextRace.round || '0'} of the ${currentYear} season\n`;
+            message += `🏎️ Circuit: ${nextRace.Circuit.circuitName || 'Unknown Circuit'}\n`;
+            message += `📍 Location: ${nextRace.Circuit.Location.locality || 'Unknown City'}, ${nextRace.Circuit.Location.country || 'Unknown Country'}\n`;
 
             // Add race date and time with user timezone
             const raceDate = moment.tz(`${nextRace.date}T${nextRace.time || '00:00:00Z'}`, timezone);
-            const dateMessage = await this.translate(chatId, 'next_race_date', {
-                date: raceDate.format('MMMM D, YYYY HH:mm'),
-                timezone: timezone
-            });
+            message += `📅 Date: ${raceDate.format('MMMM D, YYYY HH:mm')} (${timezone})\n`;
 
             // Calculate countdown
             const now = moment().tz(timezone);
@@ -664,13 +649,7 @@ export class CommandHandlers {
             const hours = duration.hours();
             const minutes = duration.minutes();
 
-            const countdownMessage = await this.translate(chatId, 'countdown', {
-                days,
-                hours,
-                minutes
-            });
-
-            let message = `${titleMessage}\n${roundMessage}\n${circuitMessage}\n${locationMessage}\n${dateMessage}\n${countdownMessage}\n\n`;
+            message += `⏱️ Countdown: ${days} days, ${hours} hours, ${minutes} minutes\n\n`;
 
             // Add qualifying and practice sessions if available, using user timezone
             if (nextRace.Qualifying) {
@@ -707,12 +686,7 @@ export class CommandHandlers {
             }
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent live session information', { chatId, nextRace: nextRace.raceName });
@@ -738,12 +712,7 @@ export class CommandHandlers {
                 const noResultsMessage = await this.translate(chatId, 'no_results');
 
                 // Return to main menu keyboard
-                const mainMenuButtons = Markup.keyboard([
-                    ['🏁 Schedule', '🏆 Driver Standings'],
-                    ['🛠️ Constructor Standings', '🏎️ Results'],
-                    ['⏱️ Live', '🛑 Pit Stops'],
-                    ['🌐 Language Settings']
-                ]).resize();
+                const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
                 await ctx.reply(noResultsMessage, mainMenuButtons);
                 return;
@@ -782,12 +751,7 @@ export class CommandHandlers {
             }
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent race results', { chatId, raceName: lastRace.raceName });
@@ -815,12 +779,7 @@ export class CommandHandlers {
                 const usageMessage = await this.translate(chatId, 'driver_info_usage');
 
                 // Return to main menu keyboard
-                const mainMenuButtons = Markup.keyboard([
-                    ['🏁 Schedule', '🏆 Driver Standings'],
-                    ['🛠️ Constructor Standings', '🏎️ Results'],
-                    ['⏱️ Live', '🛑 Pit Stops'],
-                    ['🌐 Language Settings']
-                ]).resize();
+                const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
                 await ctx.reply(usageMessage, mainMenuButtons);
                 return;
@@ -851,12 +810,7 @@ export class CommandHandlers {
                 const notFoundMessage = await this.translate(chatId, 'driver_info_not_found');
 
                 // Return to main menu keyboard
-                const mainMenuButtons = Markup.keyboard([
-                    ['🏁 Schedule', '🏆 Driver Standings'],
-                    ['🛠️ Constructor Standings', '🏎️ Results'],
-                    ['⏱️ Live', '🛑 Pit Stops'],
-                    ['🌐 Language Settings']
-                ]).resize();
+                const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
                 await ctx.reply(notFoundMessage, mainMenuButtons);
                 return;
@@ -901,12 +855,7 @@ export class CommandHandlers {
             }
 
             // Return to main menu keyboard
-            const mainMenuButtons = Markup.keyboard([
-                ['🏁 Schedule', '🏆 Driver Standings'],
-                ['🛠️ Constructor Standings', '🏎️ Results'],
-                ['⏱️ Live', '🛑 Pit Stops'],
-                ['🌐 Language Settings']
-            ]).resize();
+            const mainMenuButtons = await this.getMainMenuKeyboard(chatId);
 
             await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent driver info', {
@@ -917,6 +866,942 @@ export class CommandHandlers {
         } catch (error) {
             Logger.error('Error in handleDriverInfo', error, { chatId });
             const errorMessage = await this.translate(chatId, 'error_driver_info');
+            await ctx.reply(errorMessage);
+        }
+    }
+
+    // Create main menu keyboard buttons with proper translations
+    private async getMainMenuKeyboard(chatId: number) {
+        return Markup.keyboard([
+            [
+                await this.translate(chatId, 'btn_schedule'),
+                await this.translate(chatId, 'btn_standings')
+            ],
+            [
+                await this.translate(chatId, 'btn_results'),
+                await this.translate(chatId, 'btn_reminders')
+            ],
+            [
+                await this.translate(chatId, 'btn_language_settings')
+            ],
+            [
+                await this.translate(chatId, 'btn_exit')
+            ]
+        ]).resize();
+    }
+
+    // Helper to get standings menu keyboard with translations
+    private async getStandingsMenuKeyboard(chatId: number) {
+        return Markup.keyboard([
+            [
+                await this.translate(chatId, 'btn_driver_standings'),
+                await this.translate(chatId, 'btn_constructor_standings')
+            ],
+            [
+                await this.translate(chatId, 'back_to_main_menu')
+            ]
+        ]).resize();
+    }
+
+    // New method to handle main standings menu
+    public async handleStandingsMenu(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'standings_menu');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            const titleMessage = await this.translate(chatId, 'standings_menu_title');
+
+            await ctx.reply(titleMessage, await this.getStandingsMenuKeyboard(chatId));
+            Logger.info('Displayed standings menu', { chatId });
+        } catch (error) {
+            Logger.error('Error displaying standings menu', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+        }
+    }
+
+    // New method to handle main reminders menu
+    public async handleRemindersMenu(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'reminders_menu');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            const titleMessage = await this.translate(chatId, 'reminder_menu_title');
+
+            // Create keyboard with reminder options
+            const keyboard = await this.getRemindersMenuKeyboard(chatId);
+
+            await ctx.reply(titleMessage, keyboard);
+            Logger.info('Displayed reminders menu', { chatId });
+        } catch (error) {
+            Logger.error('Error displaying reminders menu', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+        }
+    }
+
+    // Update the name of the old handle remind method
+    public async handleAddReminder(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'add_reminder');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        // Rest of the method remains the same as the old handleRemind method
+        try {
+            // Get user
+            const user = await this.ensureUserExists(ctx);
+            if (!user) return;
+
+            // Get races schedule from API
+            const races = await ErgastService.getCurrentSchedule();
+
+            if (!races || races.length === 0) {
+                const noRacesMessage = await this.translate(chatId, 'no_upcoming_race');
+                await ctx.reply(noRacesMessage, await this.getMainMenuKeyboard(chatId));
+                return;
+            }
+
+            // Get today's date
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // Filter for upcoming races only
+            const upcomingRaces = races.filter(race => {
+                const raceDate = new Date(race.date);
+                raceDate.setHours(0, 0, 0, 0);
+                return raceDate >= today;
+            });
+
+            if (upcomingRaces.length === 0) {
+                const noRacesMessage = await this.translate(chatId, 'no_upcoming_race');
+                await ctx.reply(noRacesMessage, await this.getMainMenuKeyboard(chatId));
+                return;
+            }
+
+            // Get reminders title and explanation messages
+            const titleMessage = await this.translate(chatId, 'reminder_title');
+            const explanationMessage = await this.translate(chatId, 'reminder_explanation');
+            const backButtonText = await this.translate(chatId, 'back_to_reminders_menu');
+
+            // Build the keyboard with race options
+            const raceButtons = [];
+            const maxButtons = Math.min(upcomingRaces.length, 10); // Limit to 10 races
+
+            for (let i = 0; i < maxButtons; i++) {
+                const race = upcomingRaces[i];
+                const raceDate = new Date(race.date).toLocaleDateString('en-US', {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+                raceButtons.push([`🏁 ${race.raceName} (${raceDate})`]);
+            }
+
+            // Add back button
+            raceButtons.push([backButtonText]);
+
+            const reminderKeyboard = Markup.keyboard(raceButtons).resize();
+
+            // Send the message with race options
+            await ctx.reply(`${titleMessage}\n\n${explanationMessage}`, reminderKeyboard);
+            Logger.info('Displayed reminder race options', {
+                chatId,
+                raceCount: maxButtons
+            });
+        } catch (error) {
+            Logger.error('Error handling remind command', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+        }
+    }
+
+    // Helper method to get user ID from context
+    private getUserIdFromContext(ctx: Context): number {
+        if (!ctx.from?.id) {
+            throw new Error('Could not get user ID from context');
+        }
+        return ctx.from.id;
+    }
+
+    // Helper method to get chat ID from context
+    private getChatIdFromContext(ctx: Context): number {
+        if (!ctx.chat?.id) {
+            throw new Error('Could not get chat ID from context');
+        }
+        return ctx.chat.id;
+    }
+
+    // Define reminder options with their time values in minutes
+    private REMINDER_OPTIONS: Record<string, number> = {
+        'За 1 годину': ReminderTime.OneHour,
+        '1 hour before': ReminderTime.OneHour,
+        'За 3 години': ReminderTime.ThreeHours,
+        '3 hours before': ReminderTime.ThreeHours,
+        'За 1 день': ReminderTime.OneDay,
+        '1 day before': ReminderTime.OneDay
+    };
+
+    // Update ensureUserExists to work with either context or explicit params
+    private async ensureUserExists(input: Context | number, inputChatId?: number): Promise<{ id: number, chat_id: number } | null> {
+        try {
+            let userChatId: number;
+            let telegramUserId: number;
+
+            if (typeof input === 'number' && inputChatId !== undefined) {
+                // Case where we're called with explicit IDs
+                telegramUserId = input;
+                userChatId = inputChatId;
+            } else if (input instanceof Context) {
+                // Case where we're called with a context
+                const ctx = input as Context;
+                const chatId = ctx.chat?.id;
+                const userId = ctx.from?.id;
+
+                if (!chatId || !userId) {
+                    Logger.error('Missing user or chat ID in context', {
+                        chatId,
+                        userId
+                    });
+                    return null;
+                }
+                userChatId = chatId;
+                telegramUserId = userId;
+            } else {
+                Logger.error('Invalid parameters to ensureUserExists');
+                return null;
+            }
+
+            // Check if user exists by chat_id
+            let user = await this.db.get<{ id: number, chat_id: number }>(
+                'SELECT id, chat_id FROM users WHERE chat_id = ?',
+                [userChatId]
+            );
+
+            // Create user if doesn't exist
+            if (!user) {
+                // Log the user creation attempt
+                Logger.info('Creating new user', { chatId: userChatId, telegramUserId });
+
+                // Insert with explicit id column for the primary key
+                await this.db.run(
+                    'INSERT INTO users (chat_id) VALUES (?)',
+                    [userChatId]
+                );
+
+                // Get the newly created user
+                user = await this.db.get<{ id: number, chat_id: number }>(
+                    'SELECT id, chat_id FROM users WHERE chat_id = ?',
+                    [userChatId]
+                );
+
+                if (!user) {
+                    Logger.error('Failed to retrieve newly created user', { chatId: userChatId, telegramUserId });
+                    return null;
+                }
+
+                Logger.info('New user created successfully', user);
+            }
+
+            return user;
+        } catch (error) {
+            const chatId = typeof inputChatId === 'number' ? inputChatId : (input instanceof Context ? input.chat?.id : undefined);
+            const userId = typeof input === 'number' ? input : (input instanceof Context ? input.from?.id : undefined);
+
+            Logger.error('Error ensuring user exists', error, { chatId, userId });
+            return null;
+        }
+    }
+
+    // Handle selection of a race for reminder
+    public async handleRaceReminderSelection(ctx: Context, raceName: string): Promise<void> {
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            // Extract race name from the button text
+            const raceNameOnly = raceName.replace(/🏁 /, '').split(' (')[0];
+            Logger.debug('Race reminder selection', { chatId, raceName: raceNameOnly });
+
+            // Find the race in the schedule
+            const races = await ErgastService.getCurrentSchedule();
+            const selectedRace = races.find(r => r.raceName === raceNameOnly);
+
+            if (!selectedRace) {
+                Logger.error('Selected race not found in schedule', { chatId, raceName: raceNameOnly });
+                const errorMessage = await this.translate(chatId, 'error_general');
+                await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+                return;
+            }
+
+            // Get reminder time options from translation
+            const optionsMessage = await this.translate(chatId, 'reminder_options');
+            const oneHourText = await this.translate(chatId, 'reminder_1h');
+            const threeHoursText = await this.translate(chatId, 'reminder_3h');
+            const oneDayText = await this.translate(chatId, 'reminder_1d');
+            const backButtonText = await this.translate(chatId, 'back_to_reminders_menu');
+
+            // Create keyboard with reminder time options
+            const reminderOptions = Markup.keyboard([
+                [oneHourText, threeHoursText],
+                [oneDayText],
+                [backButtonText]
+            ]).resize();
+
+            // Store the selected race in session for use when time is selected
+            const sessionData: SessionData = {
+                selectedRace: {
+                    id: `${selectedRace.season}_${selectedRace.round}`,
+                    name: selectedRace.raceName,
+                    date: selectedRace.date,
+                    time: selectedRace.time
+                }
+            };
+
+            // Save to our sessions map
+            this.sessions.set(chatId, sessionData);
+
+            if (sessionData.selectedRace) {
+                Logger.debug('Stored race in session', {
+                    chatId,
+                    raceId: sessionData.selectedRace.id
+                });
+            }
+
+            await ctx.reply(`${optionsMessage} - ${selectedRace.raceName}`, reminderOptions);
+            Logger.info('Displayed reminder time options', {
+                chatId,
+                race: selectedRace.raceName
+            });
+        } catch (error) {
+            Logger.error('Error handling race reminder selection', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+        }
+    }
+
+    // List all active reminders for a user
+    private async listReminders(ctx: Context, userId: number, chatId: number): Promise<void> {
+        try {
+            // Get all reminders for this user
+            const reminders = await this.db.query<Reminder>(
+                `SELECT r.id, r.user_id, r.chat_id, r.event_id, r.remind_before, r.created_at
+                FROM reminders r 
+                WHERE r.user_id = ?`,
+                [userId]
+            );
+
+            if (reminders.length === 0) {
+                const noneMessage = await this.translate(chatId, 'reminder_none');
+
+                await ctx.reply(noneMessage, await this.getMainMenuKeyboard(chatId));
+                return;
+            }
+
+            // Get the title from translation
+            const titleMessage = await this.translate(chatId, 'reminder_list_title');
+            let message = `${titleMessage}\n\n`;
+
+            // Get information about each race
+            const races = await ErgastService.getCurrentSchedule();
+
+            for (const reminder of reminders) {
+                // Find the race information
+                const race = races.find(r => `${r.season}_${r.round}` === reminder.event_id);
+
+                if (!race) continue;
+
+                // Determine the reminder time text
+                let reminderTimeText = '';
+                if (reminder.remind_before === ReminderTime.OneHour) {
+                    reminderTimeText = await this.translate(chatId, 'reminder_time_1h');
+                } else if (reminder.remind_before === ReminderTime.ThreeHours) {
+                    reminderTimeText = await this.translate(chatId, 'reminder_time_3h');
+                } else if (reminder.remind_before === ReminderTime.OneDay) {
+                    reminderTimeText = await this.translate(chatId, 'reminder_time_1d');
+                }
+
+                // Format the entry
+                const entryMessage = await this.translate(chatId, 'reminder_list_entry', {
+                    race_name: race.raceName,
+                    reminder_time: reminderTimeText
+                });
+
+                message += `${entryMessage} (ID: ${reminder.id})\n`;
+            }
+
+            message += `\nTo delete a reminder, use /remind delete [ID]`;
+
+            await ctx.reply(message, await this.getMainMenuKeyboard(chatId));
+
+        } catch (error) {
+            Logger.error('Error listing reminders', error, { chatId, userId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage);
+        }
+    }
+
+    // Delete a specific reminder
+    private async deleteReminder(ctx: Context, reminderId: number, userId: number, chatId: number): Promise<void> {
+        try {
+            Logger.info('Attempting to delete reminder', { reminderId, userId, chatId });
+
+            // First check if the reminder exists
+            const reminder = await this.db.get<Reminder>(
+                'SELECT * FROM reminders WHERE id = ? AND user_id = ?',
+                [reminderId, userId]
+            );
+
+            if (!reminder) {
+                Logger.info('Reminder not found or does not belong to user', { reminderId, userId });
+                const errorMessage = await this.translate(chatId, 'error_reminder');
+                await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+
+            // Delete the reminder, ensuring it belongs to this user
+            await this.db.run(
+                'DELETE FROM reminders WHERE id = ? AND user_id = ?',
+                [reminderId, userId]
+            );
+
+            Logger.info('Reminder deleted successfully', { reminderId, userId, chatId });
+
+            const deleteMessage = await this.translate(chatId, 'reminder_delete');
+            await ctx.reply(deleteMessage, await this.getRemindersMenuKeyboard(chatId));
+
+        } catch (error) {
+            Logger.error('Error deleting reminder', error, { chatId, userId, reminderId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+        }
+    }
+
+    // Static method to send reminder notifications
+    public static async sendReminderNotifications(db: DatabaseService, bot: any): Promise<void> {
+        try {
+            // Get current time
+            const now = moment();
+            Logger.info('Checking for reminders', { currentTime: now.format() });
+
+            // Get all current races
+            const races = await ErgastService.getCurrentSchedule();
+            if (!races || races.length === 0) {
+                Logger.info('No races found in schedule');
+                return;
+            }
+
+            // Get all active reminders
+            const allReminders = await db.query<Reminder>(
+                'SELECT * FROM reminders'
+            );
+
+            Logger.info('Found reminders in database', {
+                reminderCount: allReminders.length
+            });
+
+            // For each race, check if we need to send reminders
+            for (const race of races) {
+                const raceId = `${race.season}_${race.round}`;
+                const raceTime = moment(`${race.date} ${race.time || '00:00:00'}`);
+
+                // Skip races that have already happened
+                if (raceTime.isBefore(now)) continue;
+
+                // Get all reminders for this race
+                const reminders = await db.query<Reminder>(
+                    'SELECT * FROM reminders WHERE event_id = ?',
+                    [raceId]
+                );
+
+                if (reminders.length > 0) {
+                    Logger.info('Found reminders for race', {
+                        race: race.raceName,
+                        raceId,
+                        reminderCount: reminders.length,
+                        raceTime: raceTime.format()
+                    });
+                }
+
+                for (const reminder of reminders) {
+                    try {
+                        // Calculate when to send reminder
+                        const reminderTime = moment(raceTime).subtract(reminder.remind_before, 'minutes');
+
+                        // If it's time to send reminder (within 1 minute window)
+                        const diffMinutes = reminderTime.diff(now, 'minutes');
+
+                        Logger.debug('Checking reminder timing', {
+                            raceId,
+                            reminderId: reminder.id,
+                            chatId: reminder.chat_id,
+                            reminderTime: reminderTime.format(),
+                            diffMinutes
+                        });
+
+                        if (diffMinutes >= 0 && diffMinutes < 1) {
+                            Logger.info('Sending reminder notification', {
+                                raceId,
+                                reminderId: reminder.id,
+                                chatId: reminder.chat_id
+                            });
+
+                            // Get user's language preference
+                            const user = await db.get<{ language: string }>(
+                                'SELECT language FROM users WHERE chat_id = ?',
+                                [reminder.chat_id]
+                            );
+
+                            const language = (user?.language as LanguageCode) || 'en';
+
+                            // Format time left
+                            let timeLeftText = '';
+                            if (reminder.remind_before === ReminderTime.OneHour) {
+                                timeLeftText = getTranslation('reminder_time_1h', language);
+                            } else if (reminder.remind_before === ReminderTime.ThreeHours) {
+                                timeLeftText = getTranslation('reminder_time_3h', language);
+                            } else if (reminder.remind_before === ReminderTime.OneDay) {
+                                timeLeftText = getTranslation('reminder_time_1d', language);
+                            }
+
+                            // Create notification message
+                            const message = getTranslation('reminder_notification', language, {
+                                race_name: race.raceName,
+                                time_left: timeLeftText,
+                                location: `${race.Circuit.Location.locality}, ${race.Circuit.Location.country}`,
+                                race_time: raceTime.format('MMMM D, YYYY HH:mm')
+                            });
+
+                            // Send the notification
+                            await bot.telegram.sendMessage(reminder.chat_id, message);
+
+                            // Delete the reminder after sending
+                            await db.run(
+                                'DELETE FROM reminders WHERE id = ?',
+                                [reminder.id]
+                            );
+
+                            Logger.info('Sent race reminder', {
+                                chatId: reminder.chat_id,
+                                race: race.raceName
+                            });
+                        }
+                    } catch (reminderError) {
+                        Logger.error('Error processing individual reminder', reminderError, {
+                            reminderId: reminder.id,
+                            chatId: reminder.chat_id
+                        });
+                        // Continue with other reminders
+                    }
+                }
+            }
+        } catch (error) {
+            Logger.error('Error sending reminder notifications', error);
+        }
+    }
+
+    // Add a public method to handle My Reminders button
+    public async handleMyReminders(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'myreminders');
+        const chatId = ctx.chat?.id;
+        if (!chatId) return;
+
+        try {
+            // Get user information
+            const user = await this.ensureUserExists(ctx);
+            if (!user) {
+                const errorMessage = await this.translate(chatId, 'error_general');
+                await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+                return;
+            }
+
+            // Show the reminder management menu
+            await this.showReminderManagementMenu(ctx, user.id, chatId);
+        } catch (error) {
+            Logger.error('Error in handleMyReminders', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+        }
+    }
+
+    // Add a method to show the reminder management menu
+    private async showReminderManagementMenu(ctx: Context, userId: number, chatId: number): Promise<void> {
+        try {
+            // Get all reminders for this user
+            const reminders = await this.db.query<Reminder>(
+                `SELECT r.id, r.user_id, r.chat_id, r.event_id, r.remind_before
+                FROM reminders r 
+                WHERE r.user_id = ?`,
+                [userId]
+            );
+
+            if (reminders.length === 0) {
+                const noneMessage = await this.translate(chatId, 'reminder_none');
+                await ctx.reply(noneMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+
+            // Get the title from translation
+            const titleMessage = await this.translate(chatId, 'reminder_list_title');
+            let message = `${titleMessage}\n\n`;
+
+            // Get information about each race
+            const races = await ErgastService.getCurrentSchedule();
+
+            // Build the message and keyboard buttons
+            const reminderButtons = [];
+
+            for (const reminder of reminders) {
+                // Find the race information
+                const race = races.find(r => `${r.season}_${r.round}` === reminder.event_id);
+                if (!race) continue;
+
+                // Determine the reminder time text
+                let reminderTimeText = '';
+                if (reminder.remind_before === ReminderTime.OneHour) {
+                    reminderTimeText = await this.translate(chatId, 'reminder_time_1h');
+                } else if (reminder.remind_before === ReminderTime.ThreeHours) {
+                    reminderTimeText = await this.translate(chatId, 'reminder_time_3h');
+                } else if (reminder.remind_before === ReminderTime.OneDay) {
+                    reminderTimeText = await this.translate(chatId, 'reminder_time_1d');
+                }
+
+                // Format the entry
+                const entryMessage = await this.translate(chatId, 'reminder_list_entry', {
+                    race_name: race.raceName,
+                    reminder_time: reminderTimeText
+                });
+
+                message += `${entryMessage} (ID: ${reminder.id})\n`;
+
+                // Add a delete button for this reminder
+                reminderButtons.push([`❌ ${race.raceName} - ${reminderTimeText} (ID: ${reminder.id})`]);
+            }
+
+            // Add back button
+            const backButtonText = await this.translate(chatId, 'back_to_reminders_menu');
+            reminderButtons.push([backButtonText]);
+
+            // Create keyboard markup
+            const markup = Markup.keyboard(reminderButtons).resize();
+
+            message += `\n${await this.translate(chatId, 'reminder_delete_instruction')}`;
+
+            await ctx.reply(message, markup);
+            Logger.info('Displayed user reminders', { chatId, reminderCount: reminders.length });
+        } catch (error) {
+            Logger.error('Error showing reminder management menu', error, { chatId, userId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+        }
+    }
+
+    // Add a method to handle deletion from the menu
+    public async handleReminderDeletion(ctx: Context, text: string): Promise<void> {
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            const user = await this.ensureUserExists(ctx);
+            if (!user) return;
+
+            // Extract the reminder ID from the button text
+            const idMatch = text.match(/ID: (\d+)/);
+            if (!idMatch || !idMatch[1]) {
+                Logger.error('Could not extract reminder ID from button text', { text });
+                const errorMessage = await this.translate(chatId, 'error_reminder');
+                await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+
+            const reminderId = parseInt(idMatch[1]);
+            await this.deleteReminder(ctx, reminderId, user.id, chatId);
+
+            // Show the reminders list again after deletion
+            await this.showReminderManagementMenu(ctx, user.id, chatId);
+        } catch (error) {
+            Logger.error('Error handling reminder deletion', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+        }
+    }
+
+    // Handle reminder time selection
+    public async handleReminderTimeSelection(
+        ctx: Context,
+        selectedOption: string
+    ): Promise<void> {
+        try {
+            const userId = this.getUserIdFromContext(ctx);
+            const chatId = this.getChatIdFromContext(ctx);
+            Logger.debug('handleReminderTimeSelection called', { userId, chatId, selectedOption });
+
+            // Get the selected race from session context
+            const sessionContext = this.sessions.get(chatId);
+            if (!sessionContext || !sessionContext.selectedRace) {
+                Logger.error('No selected race in session context', { chatId });
+                const errorMessage = await this.translate(chatId, 'error_reminder');
+                await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+            const selectedRace = sessionContext.selectedRace;
+            Logger.debug('Found selected race', {
+                race: selectedRace.name,
+                raceId: selectedRace.id
+            });
+
+            // Get user
+            let user;
+            try {
+                user = await this.ensureUserExists(userId, chatId);
+                if (!user) {
+                    Logger.error('Failed to ensure user exists', { userId, chatId });
+                    const errorMessage = await this.translate(chatId, 'error_reminder');
+                    await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                    return;
+                }
+
+                Logger.debug('User retrieved', {
+                    userId: user.id,
+                    chatId: user.chat_id
+                });
+            } catch (error) {
+                Logger.error('Failed to get user', error, { userId, chatId });
+                const errorMessage = await this.translate(chatId, 'error_reminder');
+                await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+
+            // Check reminder time option
+            const minutesBefore = this.REMINDER_OPTIONS[selectedOption];
+            if (minutesBefore === undefined) {
+                Logger.error('Invalid reminder option selected', { selectedOption });
+                const errorMessage = await this.translate(chatId, 'error_reminder');
+                await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+            Logger.debug('Reminder time calculated', {
+                option: selectedOption,
+                minutesBefore
+            });
+
+            // Store reminder in database
+            try {
+                Logger.debug('Checking for existing reminder', {
+                    userId: user.id,
+                    chatId,
+                    raceId: selectedRace.id
+                });
+
+                // Check if the user already has a reminder for this race
+                const existingReminder = await this.db.get<Reminder>(
+                    'SELECT id FROM reminders WHERE user_id = ? AND event_id = ?',
+                    [user.id, selectedRace.id]
+                );
+
+                if (existingReminder) {
+                    // Update existing reminder
+                    Logger.debug('Updating existing reminder', {
+                        reminderId: existingReminder.id,
+                        newMinutesBefore: minutesBefore
+                    });
+
+                    await this.db.run(
+                        'UPDATE reminders SET remind_before = ? WHERE id = ?',
+                        [minutesBefore, existingReminder.id]
+                    );
+                    Logger.info('Reminder updated successfully', { reminderId: existingReminder.id });
+                } else {
+                    // Insert new reminder
+                    Logger.debug('Creating new reminder', {
+                        userId: user.id,
+                        chatId,
+                        raceId: selectedRace.id,
+                        minutesBefore
+                    });
+
+                    await this.db.run(
+                        `INSERT INTO reminders 
+                        (user_id, chat_id, event_id, remind_before) 
+                        VALUES (?, ?, ?, ?)`,
+                        [user.id, chatId, selectedRace.id, minutesBefore]
+                    );
+                    Logger.info('New reminder created successfully');
+                }
+
+            } catch (dbError) {
+                Logger.error('Database error while processing reminder', dbError, {
+                    userId: user.id,
+                    chatId,
+                    raceId: selectedRace.id
+                });
+                const errorMessage = await this.translate(chatId, 'error_reminder');
+                await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+
+            // Clear session context
+            delete sessionContext.selectedRace;
+            this.sessions.set(chatId, sessionContext);
+
+            // Send confirmation message
+            const successMessage = await this.translate(
+                chatId,
+                'reminder_set',
+                {
+                    race_name: selectedRace.name,
+                    time_before: await this.translate(chatId, selectedOption)
+                }
+            );
+            await ctx.reply(successMessage, await this.getRemindersMenuKeyboard(chatId));
+            Logger.info('Reminder set successfully', { userId: user.id, chatId, raceId: selectedRace.id });
+        } catch (error) {
+            const chatId = this.getChatIdFromContext(ctx);
+            Logger.error('Error handling reminder time selection', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+        }
+    }
+
+    // Helper to get reminders menu keyboard with translations
+    private async getRemindersMenuKeyboard(chatId: number) {
+        return Markup.keyboard([
+            [
+                await this.translate(chatId, 'btn_add_reminder'),
+                await this.translate(chatId, 'btn_manage_reminders')
+            ],
+            [
+                await this.translate(chatId, 'back_to_main_menu')
+            ]
+        ]).resize();
+    }
+
+    // Handle managing reminders
+    public async handleManageReminders(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'manage_reminders');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            // Get user information
+            const user = await this.ensureUserExists(ctx);
+            if (!user) {
+                const errorMessage = await this.translate(chatId, 'error_general');
+                await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+                return;
+            }
+
+            // Show the reminder management menu
+            await this.showReminderManagementMenu(ctx, user.id, chatId);
+        } catch (error) {
+            Logger.error('Error in handleManageReminders', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_reminder');
+            await ctx.reply(errorMessage, await this.getRemindersMenuKeyboard(chatId));
+        }
+    }
+
+    // Helper to get language selection keyboard with translations
+    private async getLanguageMenuKeyboard(chatId: number) {
+        return Markup.keyboard([
+            [
+                await this.translate(chatId, 'btn_english'),
+                await this.translate(chatId, 'btn_ukrainian')
+            ],
+            [
+                await this.translate(chatId, 'back_to_main_menu')
+            ]
+        ]).resize();
+    }
+
+    // Helper to get schedule menu keyboard with translations
+    private async getScheduleMenuKeyboard(chatId: number) {
+        return Markup.keyboard([
+            [
+                await this.translate(chatId, 'btn_schedule_view'),
+                await this.translate(chatId, 'btn_live')
+            ],
+            [
+                await this.translate(chatId, 'back_to_main_menu')
+            ]
+        ]).resize();
+    }
+
+    // New method to handle main schedule menu
+    public async handleScheduleMenu(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'schedule_menu');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            const titleMessage = await this.translate(chatId, 'schedule_menu_title');
+
+            await ctx.reply(titleMessage, await this.getScheduleMenuKeyboard(chatId));
+            Logger.info('Displayed schedule menu', { chatId });
+        } catch (error) {
+            Logger.error('Error displaying schedule menu', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+        }
+    }
+
+    // Helper to get results menu keyboard with translations
+    private async getResultsMenuKeyboard(chatId: number) {
+        return Markup.keyboard([
+            [
+                await this.translate(chatId, 'btn_race_results'),
+                await this.translate(chatId, 'btn_pit_stops')
+            ],
+            [
+                await this.translate(chatId, 'back_to_main_menu')
+            ]
+        ]).resize();
+    }
+
+    // New method to handle main results menu
+    public async handleResultsMenu(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'results_menu');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            const titleMessage = await this.translate(chatId, 'results_menu_title');
+
+            await ctx.reply(titleMessage, await this.getResultsMenuKeyboard(chatId));
+            Logger.info('Displayed results menu', { chatId });
+        } catch (error) {
+            Logger.error('Error displaying results menu', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage, await this.getMainMenuKeyboard(chatId));
+        }
+    }
+
+    // Handle exit button - remove keyboard
+    public async handleExit(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'exit');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            const exitMessage = await this.translate(chatId, 'menu_closed');
+
+            // Send message with RemoveKeyboard markup
+            await ctx.reply(exitMessage, Markup.removeKeyboard());
+
+            Logger.info('Removed keyboard', { chatId });
+        } catch (error) {
+            Logger.error('Error handling exit button', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
+            await ctx.reply(errorMessage);
+        }
+    }
+
+    // Handle /menu command - show main menu
+    public async handleMenu(ctx: Context): Promise<void> {
+        Logger.command(ctx, 'menu');
+        const chatId = this.getChatIdFromContext(ctx);
+
+        try {
+            const menuMessage = await this.translate(chatId, 'menu_opened');
+
+            // Send message with main menu keyboard
+            await ctx.reply(menuMessage, await this.getMainMenuKeyboard(chatId));
+
+            Logger.info('Opened main menu', { chatId });
+        } catch (error) {
+            Logger.error('Error handling menu command', error, { chatId });
+            const errorMessage = await this.translate(chatId, 'error_general');
             await ctx.reply(errorMessage);
         }
     }
