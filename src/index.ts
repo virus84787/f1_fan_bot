@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import { CommandHandlers } from './bot/commands';
 import dotenv from 'dotenv';
 import schedule from 'node-schedule';
@@ -36,12 +36,23 @@ async function main() {
         bot.command('live', (ctx) => commandHandlers.handleLive(ctx));
         bot.command('pitstops', (ctx) => commandHandlers.handlePitStops(ctx));
         bot.command('driver', (ctx) => commandHandlers.handleDriverInfo(ctx));
-        bot.command('apistatus', (ctx) => commandHandlers.handleApiStatus(ctx));
         bot.command('language', (ctx) => commandHandlers.handleLanguage(ctx));
         bot.command('language_en', (ctx) => commandHandlers.handleLanguageEn(ctx));
         bot.command('language_uk', (ctx) => commandHandlers.handleLanguageUk(ctx));
+        
+        // Handle message-based keyboard buttons
+        bot.hears('🏁 Schedule', (ctx) => commandHandlers.handleSchedule(ctx));
+        bot.hears('🏆 Driver Standings', (ctx) => commandHandlers.handleDriverStandings(ctx));
+        bot.hears('🛠️ Constructor Standings', (ctx) => commandHandlers.handleConstructorStandings(ctx));
+        bot.hears('🏎️ Results', (ctx) => commandHandlers.handleResults(ctx));
+        bot.hears('⏱️ Live', (ctx) => commandHandlers.handleLive(ctx));
+        bot.hears('🛑 Pit Stops', (ctx) => commandHandlers.handlePitStops(ctx));
+        bot.hears('🌐 Language Settings', (ctx) => commandHandlers.handleLanguage(ctx));
+        bot.hears('🇬🇧 English', (ctx) => commandHandlers.handleLanguageEn(ctx));
+        bot.hears('🇺🇦 Ukrainian', (ctx) => commandHandlers.handleLanguageUk(ctx));
+        bot.hears('⬅️ Back to Main Menu', (ctx) => commandHandlers.handleStart(ctx));
 
-        Logger.info('Bot commands registered');
+        Logger.info('Bot commands and message handlers registered');
 
         // Update bot commands list
         await bot.telegram.setMyCommands([
@@ -54,10 +65,7 @@ async function main() {
             { command: 'driver', description: 'Get driver info (use: /driver Hamilton)' },
             { command: 'results', description: 'Get last race results' },
             { command: 'settimezone', description: 'Set your timezone' },
-            { command: 'apistatus', description: 'View or change data source' },
-            { command: 'language', description: 'Language settings' },
-            { command: 'language_en', description: 'Switch to English' },
-            { command: 'language_uk', description: 'Switch to Ukrainian' }
+            { command: 'language', description: 'Language settings' }
         ]);
 
         // Schedule updates for race data

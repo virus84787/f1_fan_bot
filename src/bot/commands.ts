@@ -5,6 +5,7 @@ import moment from 'moment-timezone';
 import { Message } from 'telegraf/types';
 import { Logger } from '../utils/logger';
 import { getTranslation, isValidLanguage, LanguageCode, languageNames } from '../locale';
+import { Markup } from 'telegraf';
 
 export class CommandHandlers {
     private db: DatabaseService;
@@ -17,6 +18,17 @@ export class CommandHandlers {
         const db = await DatabaseService.getInstance();
         Logger.info('CommandHandlers initialized');
         return new CommandHandlers(db);
+    }
+
+    // Helper method to acknowledge button callbacks
+    private async acknowledgeCallback(ctx: Context): Promise<void> {
+        try {
+            if ('callback_query' in ctx.update) {
+                await ctx.answerCbQuery();
+            }
+        } catch (error) {
+            Logger.error('Error acknowledging callback', error);
+        }
     }
 
     // Helper method to get user language preference
@@ -45,6 +57,8 @@ export class CommandHandlers {
         if (!chatId) return;
 
         try {
+            // No need to acknowledge callback for regular keyboard buttons
+
             await this.db.run(
                 'INSERT OR IGNORE INTO users (id, chat_id) VALUES (?, ?)',
                 [ctx.from?.id, chatId]
@@ -52,7 +66,16 @@ export class CommandHandlers {
             Logger.info('New user registered', { userId: ctx.from?.id, chatId });
 
             const welcomeMessage = await this.translate(chatId, 'welcome');
-            await ctx.reply(welcomeMessage);
+
+            // Create main menu keyboard buttons
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(welcomeMessage, mainMenuButtons);
         } catch (error) {
             Logger.error('Error in handleStart', error, { chatId });
             const errorMessage = await this.translate(chatId, 'error_general');
@@ -60,16 +83,13 @@ export class CommandHandlers {
         }
     }
 
-    // Add language command handler
+    // Update language command handler to use buttons
     public async handleLanguage(ctx: Context): Promise<void> {
         Logger.command(ctx, 'language');
         const chatId = ctx.chat?.id;
         if (!chatId) return;
 
         try {
-            const message = ctx.message as Message.TextMessage | undefined;
-            if (!message?.text) return;
-
             // Ensure the user exists in the database
             await this.db.run(
                 'INSERT OR IGNORE INTO users (id, chat_id) VALUES (?, ?)',
@@ -82,7 +102,14 @@ export class CommandHandlers {
             const languageName = languageNames[currentLanguage] || currentLanguage;
             const currentLangMessage = await this.translate(chatId, 'language_current', { language: languageName });
             const optionsMessage = await this.translate(chatId, 'language_options');
-            await ctx.reply(`${currentLangMessage}\n\n${optionsMessage}`);
+
+            // Create language selection keyboard
+            const languageButtons = Markup.keyboard([
+                ['🇬🇧 English', '🇺🇦 Ukrainian'],
+                ['⬅️ Back to Main Menu']
+            ]).resize();
+
+            await ctx.reply(`${currentLangMessage}\n\n${optionsMessage}`, languageButtons);
         } catch (error) {
             Logger.error('Error in handleLanguage', error, { chatId });
             const errorMessage = await this.translate(chatId, 'error_general');
@@ -90,7 +117,6 @@ export class CommandHandlers {
         }
     }
 
-    // Handle English language selection
     public async handleLanguageEn(ctx: Context): Promise<void> {
         Logger.command(ctx, 'language_en');
         const chatId = ctx.chat?.id;
@@ -120,7 +146,15 @@ export class CommandHandlers {
                 oldLanguage: currentLanguage
             });
 
-            await ctx.reply(confirmMessage);
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(confirmMessage, mainMenuButtons);
         } catch (error) {
             Logger.error('Error in handleLanguageEn', error, { chatId });
             const errorMessage = await this.translate(chatId, 'error_general');
@@ -128,7 +162,6 @@ export class CommandHandlers {
         }
     }
 
-    // Handle Ukrainian language selection
     public async handleLanguageUk(ctx: Context): Promise<void> {
         Logger.command(ctx, 'language_uk');
         const chatId = ctx.chat?.id;
@@ -158,7 +191,15 @@ export class CommandHandlers {
                 oldLanguage: currentLanguage
             });
 
-            await ctx.reply(confirmMessage);
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(confirmMessage, mainMenuButtons);
         } catch (error) {
             Logger.error('Error in handleLanguageUk', error, { chatId });
             const errorMessage = await this.translate(chatId, 'error_general');
@@ -188,15 +229,15 @@ export class CommandHandlers {
             });
 
             const timezone = user?.timezone || 'UTC';
-            const now = moment();
+            const now = moment().tz(timezone);
 
             // Split races into upcoming and past
             const upcomingRaces = races
-                .filter(race => moment(`${race.date} ${race.time || '00:00:00'}`).isAfter(now))
+                .filter(race => moment.tz(`${race.date} ${race.time || '00:00:00'}`, timezone).isAfter(now))
                 .slice(0, 5);
 
             const pastRaces = races
-                .filter(race => moment(`${race.date} ${race.time || '00:00:00'}`).isBefore(now))
+                .filter(race => moment.tz(`${race.date} ${race.time || '00:00:00'}`, timezone).isBefore(now))
                 .slice(-5)
                 .reverse();
 
@@ -321,7 +362,15 @@ export class CommandHandlers {
                 message = noRacesMessage;
             }
 
-            await ctx.reply(message);
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent schedule message', {
                 chatId,
                 upcomingRacesCount: upcomingRaces.length,
@@ -342,30 +391,48 @@ export class CommandHandlers {
         if (!chatId) return;
 
         try {
+            // Get the current driver standings
             const standings = await ErgastService.getDriverStandings();
-            Logger.info('Retrieved driver standings', { count: standings.length });
+            Logger.info('Retrieved driver standings', { chatId, count: standings.length });
 
-            const titleMessage = await this.translate(chatId, 'driver_standings_title');
-            let message = `${titleMessage}\n\n`;
+            // Format the standings message
+            const headerMessage = await this.translate(chatId, 'driver_standings_header');
+            let message = `${headerMessage}\n\n`;
 
-            for (let i = 0; i < Math.min(standings.length, 10); i++) {
-                const standing = standings[i];
-                const entryMessage = await this.translate(chatId, 'driver_standings_entry', {
-                    position: i + 1,
-                    firstName: standing.Driver.givenName,
-                    lastName: standing.Driver.familyName,
-                    points: standing.points,
-                    wins: standing.wins,
-                    team: standing.Constructors[0].name
+            // Use a counter for sequential numbering
+            let positionCounter = 1;
+
+            for (const standing of standings.slice(0, 20)) { // Limit to top 20
+                // Use either the valid API position or our sequential position counter
+                const position = (standing.position && standing.position !== "-") ?
+                    standing.position :
+                    positionCounter.toString();
+
+                const formattedStanding = await this.translate(chatId, 'driver_standing_entry', {
+                    position: position,
+                    name: `${standing.Driver.givenName} ${standing.Driver.familyName}`,
+                    team: standing.Constructors[0].name,
+                    points: standing.points
                 });
-                message += `${entryMessage}\n\n`;
+                message += `${formattedStanding}\n`;
+
+                // Always increment our counter
+                positionCounter++;
             }
 
-            await ctx.reply(message);
-            Logger.info('Sent driver standings message', { chatId });
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(message, mainMenuButtons);
+            Logger.info('Displayed driver standings', { chatId });
         } catch (error) {
             Logger.error('Error in handleDriverStandings', error, { chatId });
-            const errorMessage = await this.translate(chatId, 'error_driver_standings');
+            const errorMessage = await this.translate(chatId, 'error_general');
             await ctx.reply(errorMessage);
         }
     }
@@ -376,28 +443,47 @@ export class CommandHandlers {
         if (!chatId) return;
 
         try {
+            // Get the current constructor standings
             const standings = await ErgastService.getConstructorStandings();
-            Logger.info('Retrieved constructor standings', { count: standings.length });
+            Logger.info('Retrieved constructor standings', { chatId, count: standings.length });
 
-            const titleMessage = await this.translate(chatId, 'constructor_standings_title');
-            let message = `${titleMessage}\n\n`;
+            // Format the standings message
+            const headerMessage = await this.translate(chatId, 'constructor_standings_header');
+            let message = `${headerMessage}\n\n`;
 
-            for (let i = 0; i < standings.length; i++) {
-                const standing = standings[i];
-                const entryMessage = await this.translate(chatId, 'constructor_standings_entry', {
-                    position: i + 1,
+            // Use a counter for sequential numbering
+            let positionCounter = 1;
+
+            for (const standing of standings) {
+                // Use either the valid API position or our sequential position counter
+                const position = (standing.position && standing.position !== "-") ?
+                    standing.position :
+                    positionCounter.toString();
+
+                const formattedStanding = await this.translate(chatId, 'constructor_standing_entry', {
+                    position: position,
                     name: standing.Constructor.name,
-                    points: standing.points,
-                    wins: standing.wins
+                    points: standing.points
                 });
-                message += `${entryMessage}\n\n`;
+                message += `${formattedStanding}\n`;
+
+                // Always increment our counter
+                positionCounter++;
             }
 
-            await ctx.reply(message);
-            Logger.info('Sent constructor standings message', { chatId });
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(message, mainMenuButtons);
+            Logger.info('Displayed constructor standings', { chatId });
         } catch (error) {
             Logger.error('Error in handleConstructorStandings', error, { chatId });
-            const errorMessage = await this.translate(chatId, 'error_constructor_standings');
+            const errorMessage = await this.translate(chatId, 'error_general');
             await ctx.reply(errorMessage);
         }
     }
@@ -417,7 +503,16 @@ export class CommandHandlers {
                 attemptedTimezone: timezone
             });
             const invalidMessage = await this.translate(chatId, 'timezone_invalid');
-            await ctx.reply(invalidMessage);
+
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(invalidMessage, mainMenuButtons);
             return;
         }
 
@@ -434,7 +529,16 @@ export class CommandHandlers {
             const successMessage = await this.translate(chatId, 'timezone_updated', {
                 timezone: timezone
             });
-            await ctx.reply(successMessage);
+
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(successMessage, mainMenuButtons);
         } catch (error) {
             Logger.error('Error in handleSetTimezone', error, {
                 chatId,
@@ -451,50 +555,40 @@ export class CommandHandlers {
         if (!chatId) return;
 
         try {
-            const lastRace = await ErgastService.getLastRaceResults();
-            Logger.info('Retrieved last race results', {
-                raceName: lastRace.raceName,
-                resultCount: lastRace.Results.length,
-                date: lastRace.date
+            // Get the latest race results
+            const results = await ErgastService.getLastRaceResults();
+            Logger.info('Retrieved latest race results', { chatId, count: results.Results.length });
+
+            // Format the results message
+            const headerMessage = await this.translate(chatId, 'results_header', {
+                raceName: results.raceName,
+                date: moment(results.date).format('YYYY-MM-DD')
             });
+            let message = `${headerMessage}\n\n`;
 
-            const user = await this.db.get<{ timezone: string }>(
-                'SELECT timezone FROM users WHERE chat_id = ?',
-                [chatId]
-            );
-            const timezone = user?.timezone || 'UTC';
-
-            const raceDate = moment.tz(`${lastRace.date} ${lastRace.time || '00:00:00'}`, timezone);
-
-            const titleMessage = await this.translate(chatId, 'results_title', {
-                raceName: lastRace.raceName,
-                date: raceDate.format('MMMM D, YYYY')
-            });
-
-            let message = `${titleMessage}\n\n`;
-
-            for (let i = 0; i < Math.min(lastRace.Results.length, 10); i++) {
-                const result = lastRace.Results[i];
-                const entryMessage = await this.translate(chatId, 'results_entry', {
+            for (const result of results.Results.slice(0, 20)) { // Limit to top 20
+                const formattedResult = await this.translate(chatId, 'result_entry', {
                     position: result.position,
-                    firstName: result.Driver.givenName,
-                    lastName: result.Driver.familyName,
-                    constructor: result.Constructor.name,
-                    time: result.Time?.time || 'DNF',
-                    points: result.points
+                    name: `${result.Driver.givenName} ${result.Driver.familyName}`,
+                    team: result.Constructor.name,
+                    time: result.Time?.time || 'DNF'
                 });
-                message += `${entryMessage}\n\n`;
+                message += `${formattedResult}\n`;
             }
 
-            await ctx.reply(message);
-            Logger.info('Sent race results message', {
-                chatId,
-                raceDate: lastRace.date,
-                timezone
-            });
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(message, mainMenuButtons);
+            Logger.info('Displayed race results', { chatId });
         } catch (error) {
             Logger.error('Error in handleResults', error, { chatId });
-            const errorMessage = await this.translate(chatId, 'error_results');
+            const errorMessage = await this.translate(chatId, 'error_general');
             await ctx.reply(errorMessage);
         }
     }
@@ -512,10 +606,30 @@ export class CommandHandlers {
 
             if (!nextRace) {
                 const noUpcomingRaceMessage = await this.translate(chatId, 'no_upcoming_race');
-                await ctx.reply(noUpcomingRaceMessage);
+
+                // Return to main menu keyboard
+                const mainMenuButtons = Markup.keyboard([
+                    ['🏁 Schedule', '🏆 Driver Standings'],
+                    ['🛠️ Constructor Standings', '🏎️ Results'],
+                    ['⏱️ Live', '🛑 Pit Stops'],
+                    ['🌐 Language Settings']
+                ]).resize();
+
+                await ctx.reply(noUpcomingRaceMessage, mainMenuButtons);
                 return;
             }
 
+            // Get user timezone
+            const user = await this.db.get<{ timezone: string }>(
+                'SELECT timezone FROM users WHERE chat_id = ?',
+                [chatId]
+            );
+            Logger.info('Retrieved user timezone', {
+                chatId,
+                timezone: user?.timezone || 'UTC'
+            });
+
+            const timezone = user?.timezone || 'UTC';
             const drivers = await ErgastService.getDriverStandings();
 
             const titleMessage = await this.translate(chatId, 'next_race_title', {
@@ -536,14 +650,15 @@ export class CommandHandlers {
                 country: nextRace.Circuit.Location.country
             });
 
-            // Add race date and time
-            const raceDate = moment(`${nextRace.date}T${nextRace.time || '00:00:00Z'}`);
+            // Add race date and time with user timezone
+            const raceDate = moment.tz(`${nextRace.date}T${nextRace.time || '00:00:00Z'}`, timezone);
             const dateMessage = await this.translate(chatId, 'next_race_date', {
-                date: raceDate.format('MMMM D, YYYY HH:mm')
+                date: raceDate.format('MMMM D, YYYY HH:mm'),
+                timezone: timezone
             });
 
             // Calculate countdown
-            const now = moment();
+            const now = moment().tz(timezone);
             const duration = moment.duration(raceDate.diff(now));
             const days = Math.floor(duration.asDays());
             const hours = duration.hours();
@@ -557,20 +672,30 @@ export class CommandHandlers {
 
             let message = `${titleMessage}\n${roundMessage}\n${circuitMessage}\n${locationMessage}\n${dateMessage}\n${countdownMessage}\n\n`;
 
-            // Add qualifying and practice sessions if available
+            // Add qualifying and practice sessions if available, using user timezone
             if (nextRace.Qualifying) {
-                const qualiDate = moment(`${nextRace.Qualifying.date}T${nextRace.Qualifying.time}`);
-                message += `🕒 Qualifying: ${qualiDate.format('MMMM D, HH:mm')} UTC\n`;
+                const qualiDate = moment.tz(`${nextRace.Qualifying.date}T${nextRace.Qualifying.time}`, timezone);
+                message += `🕒 Qualifying: ${qualiDate.format('MMMM D, HH:mm')} (${timezone})\n`;
             }
 
             if (nextRace.FirstPractice) {
-                const fp1Date = moment(`${nextRace.FirstPractice.date}T${nextRace.FirstPractice.time}`);
-                message += `🕒 Practice 1: ${fp1Date.format('MMMM D, HH:mm')} UTC\n`;
+                const fp1Date = moment.tz(`${nextRace.FirstPractice.date}T${nextRace.FirstPractice.time}`, timezone);
+                message += `🕒 Practice 1: ${fp1Date.format('MMMM D, HH:mm')} (${timezone})\n`;
+            }
+
+            if (nextRace.SecondPractice) {
+                const fp2Date = moment.tz(`${nextRace.SecondPractice.date}T${nextRace.SecondPractice.time}`, timezone);
+                message += `🕒 Practice 2: ${fp2Date.format('MMMM D, HH:mm')} (${timezone})\n`;
+            }
+
+            if (nextRace.ThirdPractice) {
+                const fp3Date = moment.tz(`${nextRace.ThirdPractice.date}T${nextRace.ThirdPractice.time}`, timezone);
+                message += `🕒 Practice 3: ${fp3Date.format('MMMM D, HH:mm')} (${timezone})\n`;
             }
 
             if (nextRace.Sprint) {
-                const sprintDate = moment(`${nextRace.Sprint.date}T${nextRace.Sprint.time}`);
-                message += `🕒 Sprint: ${sprintDate.format('MMMM D, HH:mm')} UTC\n`;
+                const sprintDate = moment.tz(`${nextRace.Sprint.date}T${nextRace.Sprint.time}`, timezone);
+                message += `🕒 Sprint: ${sprintDate.format('MMMM D, HH:mm')} (${timezone})\n`;
             }
 
             // Add top 3 drivers from standings
@@ -581,7 +706,15 @@ export class CommandHandlers {
                 });
             }
 
-            await ctx.reply(message);
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent live session information', { chatId, nextRace: nextRace.raceName });
         } catch (error) {
             Logger.error('Error in handleLive', error, { chatId });
@@ -603,14 +736,31 @@ export class CommandHandlers {
 
             if (!lastRace) {
                 const noResultsMessage = await this.translate(chatId, 'no_results');
-                await ctx.reply(noResultsMessage);
+
+                // Return to main menu keyboard
+                const mainMenuButtons = Markup.keyboard([
+                    ['🏁 Schedule', '🏆 Driver Standings'],
+                    ['🛠️ Constructor Standings', '🏎️ Results'],
+                    ['⏱️ Live', '🛑 Pit Stops'],
+                    ['🌐 Language Settings']
+                ]).resize();
+
+                await ctx.reply(noResultsMessage, mainMenuButtons);
                 return;
             }
 
-            const raceDate = moment(lastRace.date);
+            // Get user timezone
+            const user = await this.db.get<{ timezone: string }>(
+                'SELECT timezone FROM users WHERE chat_id = ?',
+                [chatId]
+            );
+            const timezone = user?.timezone || 'UTC';
+
+            const raceDate = moment.tz(`${lastRace.date} ${lastRace.time || '00:00:00'}`, timezone);
             const titleMessage = await this.translate(chatId, 'pitstops_title', {
                 raceName: lastRace.raceName,
-                date: raceDate.format('MMMM D, YYYY')
+                date: raceDate.format('MMMM D, YYYY'),
+                timezone: timezone
             });
 
             let message = `${titleMessage}\n\n`;
@@ -631,7 +781,15 @@ export class CommandHandlers {
                 message += noPitstopsMessage;
             }
 
-            await ctx.reply(message);
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent race results', { chatId, raceName: lastRace.raceName });
         } catch (error) {
             Logger.error('Error in handlePitStops', error, { chatId });
@@ -655,7 +813,16 @@ export class CommandHandlers {
 
             if (!driverQuery) {
                 const usageMessage = await this.translate(chatId, 'driver_info_usage');
-                await ctx.reply(usageMessage);
+
+                // Return to main menu keyboard
+                const mainMenuButtons = Markup.keyboard([
+                    ['🏁 Schedule', '🏆 Driver Standings'],
+                    ['🛠️ Constructor Standings', '🏎️ Results'],
+                    ['⏱️ Live', '🛑 Pit Stops'],
+                    ['🌐 Language Settings']
+                ]).resize();
+
+                await ctx.reply(usageMessage, mainMenuButtons);
                 return;
             }
 
@@ -682,7 +849,16 @@ export class CommandHandlers {
 
             if (!foundDriver) {
                 const notFoundMessage = await this.translate(chatId, 'driver_info_not_found');
-                await ctx.reply(notFoundMessage);
+
+                // Return to main menu keyboard
+                const mainMenuButtons = Markup.keyboard([
+                    ['🏁 Schedule', '🏆 Driver Standings'],
+                    ['🛠️ Constructor Standings', '🏎️ Results'],
+                    ['⏱️ Live', '🛑 Pit Stops'],
+                    ['🌐 Language Settings']
+                ]).resize();
+
+                await ctx.reply(notFoundMessage, mainMenuButtons);
                 return;
             }
 
@@ -724,7 +900,15 @@ export class CommandHandlers {
                 message += `\nℹ️ More info: ${driver.url}\n`;
             }
 
-            await ctx.reply(message);
+            // Return to main menu keyboard
+            const mainMenuButtons = Markup.keyboard([
+                ['🏁 Schedule', '🏆 Driver Standings'],
+                ['🛠️ Constructor Standings', '🏎️ Results'],
+                ['⏱️ Live', '🛑 Pit Stops'],
+                ['🌐 Language Settings']
+            ]).resize();
+
+            await ctx.reply(message, mainMenuButtons);
             Logger.info('Sent driver info', {
                 chatId,
                 driverName: `${driver.givenName} ${driver.familyName}`,
@@ -733,50 +917,6 @@ export class CommandHandlers {
         } catch (error) {
             Logger.error('Error in handleDriverInfo', error, { chatId });
             const errorMessage = await this.translate(chatId, 'error_driver_info');
-            await ctx.reply(errorMessage);
-        }
-    }
-
-    public async handleApiStatus(ctx: Context): Promise<void> {
-        Logger.command(ctx, 'apistatus');
-        const chatId = ctx.chat?.id;
-        if (!chatId) return;
-
-        try {
-            const message = ctx.message as Message.TextMessage | undefined;
-            const command = message?.text?.split(' ')[1]?.toLowerCase() || '';
-
-            if (command === 'stats') {
-                // Show API usage statistics
-                const apiStats = ErgastService.getApiStats();
-                const currentYear = ErgastService.getCurrentYear();
-
-                const statsMessage = await this.translate(chatId, 'api_stats', {
-                    total: apiStats.total,
-                    success: apiStats.success,
-                    failed: apiStats.failed
-                });
-
-                await ctx.reply(statsMessage);
-                Logger.info('Displayed API stats', { chatId, apiStats });
-            } else {
-                // Just show status
-                const currentYear = ErgastService.getCurrentYear();
-                const apiStatus = ErgastService.getCurrentApiStatus();
-
-                const statusMessage = await this.translate(chatId, 'api_status', {
-                    source: apiStatus,
-                    status: 'active'
-                });
-
-                const usageMessage = await this.translate(chatId, 'api_usage');
-
-                await ctx.reply(`${statusMessage}\n\n${usageMessage}`);
-                Logger.info('Displayed API status', { chatId, currentApi: apiStatus });
-            }
-        } catch (error) {
-            Logger.error('Error in handleApiStatus', error, { chatId });
-            const errorMessage = await this.translate(chatId, 'error_general');
             await ctx.reply(errorMessage);
         }
     }

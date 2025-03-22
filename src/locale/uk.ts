@@ -36,18 +36,24 @@ export const uk = {
     // Driver standings
     driver_standings_title: '🏆 Поточні позиції пілотів:',
     driver_standings_entry: '{position}. {firstName} {lastName}\n   Очки: {points} | Перемоги: {wins}\n   Команда: {team}',
+    driver_standings_header: '🏆 Поточні позиції пілотів:',
+    driver_standing_entry: '{position}. {name} - {team} ({points} очки)',
 
     // Constructor standings
     constructor_standings_title: '🏭 Поточні позиції конструкторів:',
     constructor_standings_entry: '{position}. {name}\n   Очки: {points} | Перемоги: {wins}',
+    constructor_standings_header: '🏭 Поточні позиції конструкторів:',
+    constructor_standing_entry: '{position}. {name} ({points} очки)',
 
     // Set timezone
     timezone_invalid: 'Будь ласка, вкажіть правильний часовий пояс. Приклад:\n/settimezone Europe/Kiev\n\nЗнайдіть свій часовий пояс тут: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones',
     timezone_updated: 'Часовий пояс успішно встановлено на {timezone}',
 
     // Results
-    results_title: '🏁 Результати: {raceName} ({date})',
+    results_title: '🏁 Результати: {raceName} ({date}, {timezone})',
     results_entry: '{position}. {firstName} {lastName} - {constructor}\n   Час: {time}\n   Очки: {points}',
+    results_header: '🏁 Результати: {raceName} ({date})',
+    result_entry: '{position}. {name} - {team} - {time}',
     no_results: 'Результати перегонів не знайдено. Спробуйте пізніше.',
 
     // Live
@@ -55,14 +61,14 @@ export const uk = {
     next_race_round: 'Етап {round} сезону {year}',
     next_race_circuit: 'Трек: {circuitName}',
     next_race_location: 'Місце: {locality}, {country}',
-    next_race_date: 'Дата: {date}',
+    next_race_date: 'Дата: {date} ({timezone})',
     countdown: 'Зворотній відлік: {days} днів, {hours} годин, {minutes} хвилин',
     no_upcoming_race: 'Не знайдено майбутніх перегонів для цього сезону.',
 
     // Pit stops
-    pitstops_title: '🔧 Піт-стопи - {raceName} ({date})',
-    pitstops_entry: 'Круг {lap} - {firstName} {lastName}\n   Час: {duration} секунд',
-    no_pitstops: 'Дані про піт-стопи для останніх перегонів недоступні.',
+    pitstops_title: '🔧 Піт-стопи - {raceName} ({date}, {timezone})',
+    pitstops_entry: 'Коло {lap} - {firstName} {lastName}\n   Час: {duration} секунд',
+    no_pitstops: 'Дані про піт-стопи для останньої гонки відсутні.',
 
     // Driver info
     driver_info_title: 'Інформація про пілота: {firstName} {lastName}',

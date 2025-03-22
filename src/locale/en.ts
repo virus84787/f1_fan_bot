@@ -36,18 +36,24 @@ export const en = {
     // Driver standings
     driver_standings_title: '🏆 Current Driver Standings:',
     driver_standings_entry: '{position}. {firstName} {lastName}\n   Points: {points} | Wins: {wins}\n   Team: {team}',
+    driver_standings_header: '🏆 Current Driver Standings:',
+    driver_standing_entry: '{position}. {name} - {team} ({points} pts)',
 
     // Constructor standings
     constructor_standings_title: '🏭 Current Constructor Standings:',
     constructor_standings_entry: '{position}. {name}\n   Points: {points} | Wins: {wins}',
+    constructor_standings_header: '🏭 Current Constructor Standings:',
+    constructor_standing_entry: '{position}. {name} ({points} pts)',
 
     // Set timezone
     timezone_invalid: 'Please provide a valid timezone. Example:\n/settimezone Europe/London\n\nFind your timezone here: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones',
     timezone_updated: 'Timezone successfully set to {timezone}',
 
     // Results
-    results_title: '🏁 Results: {raceName} ({date})',
+    results_title: '🏁 Results: {raceName} ({date}, {timezone})',
     results_entry: '{position}. {firstName} {lastName} - {constructor}\n   Time: {time}\n   Points: {points}',
+    results_header: '🏁 Results: {raceName} ({date})',
+    result_entry: '{position}. {name} - {team} - {time}',
     no_results: 'No race results found. Please try again later.',
 
     // Live
@@ -55,12 +61,12 @@ export const en = {
     next_race_round: 'Round {round} of the {year} season',
     next_race_circuit: 'Circuit: {circuitName}',
     next_race_location: 'Location: {locality}, {country}',
-    next_race_date: 'Date: {date}',
+    next_race_date: 'Date: {date} ({timezone})',
     countdown: 'Countdown: {days} days, {hours} hours, {minutes} minutes',
     no_upcoming_race: 'No upcoming races found for this season.',
 
     // Pit stops
-    pitstops_title: '🔧 Pit Stops - {raceName} ({date})',
+    pitstops_title: '🔧 Pit Stops - {raceName} ({date}, {timezone})',
     pitstops_entry: 'Lap {lap} - {firstName} {lastName}\n   Time: {duration} seconds',
     no_pitstops: 'No pit stop data available for the last race.',
 
